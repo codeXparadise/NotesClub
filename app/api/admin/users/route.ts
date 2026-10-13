@@ -46,10 +46,11 @@ export async function GET(request: NextRequest) {
 
     let students = (rawStudents || []).map((s: any) => ({
       ...s,
-      college_name: s.college_name || "General / Unassigned",
+      division: s.division || "-",
+      college_name: s.college_name || "KES Shroff College",
       stream: s.stream || s.courses?.name || "General",
       education_level: s.education_level || "College",
-      year_or_class: s.year_or_class || "Year 1",
+      year_or_class: s.year_or_class || "FY",
       course_name: s.course_name || s.courses?.name || "Standard Notes",
     }));
 

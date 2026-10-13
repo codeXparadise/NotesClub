@@ -7,19 +7,48 @@ export async function POST(request: NextRequest) {
     const {
       fullName,
       rollNumber,
-      courseId,
-      email,
-      password,
-      collegeName,
-      educationLevel,
+      division,
       stream,
       courseName,
       yearOrClass,
+      collegeName,
+      email,
+      password,
+      courseId,
     } = body;
 
     if (!fullName?.trim() || !rollNumber?.trim() || !email?.trim() || !password) {
       return NextResponse.json(
-        { error: "Full Name, Roll Number, Email, and Password are required." },
+        { error: "Student Name, Roll Number, Email, and Password are required." },
+        { status: 400 }
+      );
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      return NextResponse.json(
+        { error: "Please enter a valid email address.", field: "email" },
+        { status: 400 }
+      );
+    }
+
+    if (!stream?.trim()) {
+      return NextResponse.json(
+        { error: "Please select your Stream (Science, Commerce, or Arts).", field: "stream" },
+        { status: 400 }
+      );
+    }
+
+    if (!courseName?.trim()) {
+      return NextResponse.json(
+        { error: "Please enter your Course.", field: "courseName" },
+        { status: 400 }
+      );
+    }
+
+    if (!yearOrClass?.trim()) {
+      return NextResponse.json(
+        { error: "Please select your Class (FY, SY, TY, or Final).", field: "yearOrClass" },
         { status: 400 }
       );
     }
@@ -34,11 +63,11 @@ export async function POST(request: NextRequest) {
     const cleanEmail = email.trim().toLowerCase();
     const cleanRoll = rollNumber.trim().toUpperCase();
     const cleanName = fullName.trim();
-    const cleanCollege = (collegeName || "").trim();
-    const cleanLevel = (educationLevel || "").trim();
+    const cleanDivision = (division || "").trim().toUpperCase();
+    const cleanCollege = (collegeName || "KES Shroff College").trim();
     const cleanStream = (stream || "").trim();
     const cleanCourseName = (courseName || "").trim();
-    const cleanYear = (yearOrClass || "").trim();
+    const cleanYear = (yearOrClass || "FY").trim();
 
     const supabaseAdmin = createAdminClient();
 
@@ -82,12 +111,12 @@ export async function POST(request: NextRequest) {
     const metadata = {
       full_name: cleanName,
       roll_number: cleanRoll,
-      course_id: courseId || null,
+      division: cleanDivision,
       college_name: cleanCollege,
-      education_level: cleanLevel,
       stream: cleanStream,
       course_name: cleanCourseName,
       year_or_class: cleanYear,
+      course_id: courseId || null,
       role: "student",
     };
 
@@ -128,12 +157,12 @@ export async function POST(request: NextRequest) {
       id: authUser.user.id,
       full_name: cleanName,
       roll_number: cleanRoll,
+      division: cleanDivision,
       course_id: courseId || null,
       email: cleanEmail,
       role: "student",
       is_blocked: false,
       college_name: cleanCollege,
-      education_level: cleanLevel,
       stream: cleanStream,
       course_name: cleanCourseName,
       year_or_class: cleanYear,
@@ -157,6 +186,10 @@ export async function POST(request: NextRequest) {
           email: cleanEmail,
           role: "student",
           is_blocked: false,
+          college_name: cleanCollege,
+          stream: cleanStream,
+          course_name: cleanCourseName,
+          year_or_class: cleanYear,
         },
         { onConflict: "id" }
       );

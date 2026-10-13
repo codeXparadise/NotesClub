@@ -29,6 +29,7 @@ interface Student {
   id: string;
   full_name: string;
   roll_number: string;
+  division?: string;
   email: string;
   role: string;
   is_blocked: boolean;
@@ -589,29 +590,41 @@ export default function AdminUsersPage() {
                         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
                           Academic Profile
                         </h3>
-                        <div className="grid grid-cols-2 gap-4 text-xs">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
                           <div>
-                            <span className="text-slate-400 block text-[11px]">College / Institute</span>
+                            <span className="text-slate-400 block text-[11px]">College</span>
                             <span className="font-semibold text-slate-900 dark:text-white">
-                              {dossier.student.college_name || "Not registered"}
+                              {dossier.student.college_name || "KES Shroff College"}
                             </span>
                           </div>
                           <div>
-                            <span className="text-slate-400 block text-[11px]">Class Level</span>
-                            <span className="font-semibold text-slate-900 dark:text-white">
-                              {dossier.student.education_level || "—"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-slate-400 block text-[11px]">Academic Stream</span>
+                            <span className="text-slate-400 block text-[11px]">Stream</span>
                             <span className="font-semibold text-slate-900 dark:text-white">
                               {dossier.student.stream || "General"}
                             </span>
                           </div>
                           <div>
-                            <span className="text-slate-400 block text-[11px]">Year / Standard</span>
+                            <span className="text-slate-400 block text-[11px]">Course</span>
                             <span className="font-semibold text-slate-900 dark:text-white">
-                              {dossier.student.year_or_class || dossier.student.course_name || "—"}
+                              {dossier.student.course_name || dossier.student.courses?.name || "—"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Class</span>
+                            <span className="font-semibold text-slate-900 dark:text-white">
+                              {dossier.student.year_or_class || "—"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Division</span>
+                            <span className="font-semibold text-slate-900 dark:text-white">
+                              {dossier.student.division || "—"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Roll Number</span>
+                            <span className="font-semibold text-slate-900 dark:text-white font-mono">
+                              {dossier.student.roll_number || "—"}
                             </span>
                           </div>
                         </div>
