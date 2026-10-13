@@ -1,0 +1,221 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #F7F4EE;         /* warm paper background */
+  --surface: #FFFFFF;    /* cards */
+  --surface-2: #F1ECE3;  /* subtle fills */
+  --line: #E9E2D6;       /* hairline borders */
+  --line-2: #DED5C6;     /* stronger border (inputs) */
+  --ink: #26261F;        /* primary text */
+  --ink-2: #5A5A4E;      /* secondary text */
+  --muted: #8E8C7E;      /* muted text */
+  --accent: #B0542E;     /* clay/terracotta accent */
+  --accent-soft: #F7EAE2;
+  --sage: #4E7A5E;       /* progress bars */
+  --radius-card: 20px;
+  --radius-pill: 999px;
+  --shadow: 0 1px 2px rgba(38,38,31,.05), 0 10px 26px rgba(38,38,31,.07);
+  --shadow-lg: 0 2px 8px rgba(38,38,31,.06), 0 22px 50px rgba(38,38,31,.12);
+}
+
+.dark {
+  --bg: #151412;
+  --surface: #1E1D19;
+  --surface-2: #282622;
+  --line: #2E2C27;
+  --line-2: #3E3B34;
+  --ink: #F5F2EA;
+  --ink-2: #C4BFB2;
+  --muted: #878377;
+  --accent: #D26E45;
+  --accent-soft: #301E17;
+  --sage: #5D9170;
+  --shadow: 0 1px 3px rgba(0,0,0,.35), 0 10px 26px rgba(0,0,0,.4);
+  --shadow-lg: 0 2px 8px rgba(0,0,0,.45), 0 22px 50px rgba(0,0,0,.6);
+}
+
+.font-serif-fraunces {
+  font-family: 'Fraunces', Georgia, serif;
+}
+
+.font-sans-jakarta {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  :root {
+    --background: 220 25% 98%;
+    --foreground: 224 71% 4%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 71% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71% 4%;
+    --primary: 238 82% 59%;
+    --primary-foreground: 210 20% 98%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 9% 39%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 220 9% 15%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 238 82% 59%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 224 71% 4%;
+    --foreground: 210 20% 98%;
+    --card: 224 71% 6%;
+    --card-foreground: 210 20% 98%;
+    --popover: 224 71% 6%;
+    --popover-foreground: 210 20% 98%;
+    --primary: 238 82% 64%;
+    --primary-foreground: 210 20% 98%;
+    --secondary: 215 28% 17%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 215 28% 17%;
+    --muted-foreground: 218 11% 65%;
+    --accent: 215 28% 17%;
+    --accent-foreground: 210 20% 98%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 215 28% 17%;
+    --input: 215 28% 17%;
+    --ring: 238 82% 64%;
+  }
+}
+
+body {
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Custom scrollbar for clean reading experience */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* Reader canvas security layer: disable selection & dragging */
+.protected-canvas-container {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Excel Spreadsheet Previewer Styles */
+.excel-reader-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+.excel-reader-table th,
+.excel-reader-table td {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+.excel-reader-table th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+  color: #e4e4e7;
+}
+.excel-reader-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Word Docx Viewer Styles */
+.docx-rendered-content {
+  line-height: 1.7;
+  font-size: 0.95rem;
+}
+.docx-rendered-content h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: #fafafa;
+}
+.docx-rendered-content h2 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: #f4f4f5;
+}
+.docx-rendered-content h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: #e4e4e7;
+}
+.docx-rendered-content p {
+  margin-bottom: 0.85rem;
+  color: #d4d4d8;
+}
+.docx-rendered-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+.docx-rendered-content th,
+.docx-rendered-content td {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 6px 10px;
+}
+
+/* ========================================================
+   MILITARY-GRADE CONTENT PROTECTION & PRINT BLOCK
+   ======================================================== */
+@media print {
+  /* Complete blackout if user triggers Print (Ctrl+P, Cmd+P, or browser menu) */
+  html, body, #__next, div, main, canvas {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+  }
+}
+
+/* Universal Anti-Selection & Anti-Download for Reader */
+.reader-secure-viewport {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+.reader-secure-viewport canvas,
+.reader-secure-viewport img,
+.reader-secure-viewport svg,
+.reader-secure-viewport table {
+  pointer-events: none !important;
+  -webkit-user-drag: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
