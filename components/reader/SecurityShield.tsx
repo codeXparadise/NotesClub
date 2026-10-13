@@ -24,6 +24,7 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
   );
   const [warningToast, setWarningToast] = useState<string | null>(null);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const unshieldTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const showWarning = useCallback((message: string) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -33,82 +34,91 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
     }, 3500);
   }, []);
 
-  // 1. Scrub clipboard whenever suspicious action or printscreen is triggered
-  const scrubClipboard = useCallback(async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(
-          "⚠️ Protected Academic Material: Screenshots & copying are strictly prohibited on Notes Club."
-        );
+  const triggerShield = useCallback(
+    (reason: string, durationMs = 2500) => {
+      if (unshieldTimeoutRef.current) clearTimeout(unshieldTimeoutRef.current);
+      setShieldReason(reason);
+      setIsShieldActive(true);
+
+      if (durationMs > 0) {
+        unshieldTimeoutRef.current = setTimeout(() => {
+          setIsShieldActive(false);
+        }, durationMs);
       }
-    } catch {
-      // Ignore permission errors if user denied clipboard write
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
-    // 2. Window Blur & Visibility Change (Desktop + Android background/screenshot detection)
+    // 1. Android & Desktop Blur / Visibility Change (Defeats OS Screenshot Buffers)
+    // On Android, pressing Power+VolDown or triggering screenshot instantly blurs the window.
     const handleBlur = () => {
-      setShieldReason("Content shielded: Window lost focus or screen capture tool invoked");
-      setIsShieldActive(true);
-      scrubClipboard();
+      triggerShield("Content shielded: Screenshot service or backgrounding active", 2000);
     };
 
     const handleFocus = () => {
-      // Delay unshielding slightly to ensure screen capture / snipping tool has exited
-      setTimeout(() => {
+      // Delay unshielding by 1.2s to ensure the OS screenshot flash animation has completely finished
+      if (unshieldTimeoutRef.current) clearTimeout(unshieldTimeoutRef.current);
+      unshieldTimeoutRef.current = setTimeout(() => {
         setIsShieldActive(false);
-      }, 350);
+      }, 1200);
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
-        setShieldReason("Content shielded: Screen backgrounded or captured");
-        setIsShieldActive(true);
-        scrubClipboard();
+        triggerShield("Content shielded: Screen backgrounded or captured", 2000);
       } else {
-        setTimeout(() => {
+        if (unshieldTimeoutRef.current) clearTimeout(unshieldTimeoutRef.current);
+        unshieldTimeoutRef.current = setTimeout(() => {
           setIsShieldActive(false);
-        }, 350);
+        }, 1200);
       }
     };
 
-    // 3. Strict Key Combination Interception (Anti-Save, Anti-Print, Anti-DevTools)
+    // 2. Hardware Button Combinations & Keyboard Screenshot Keys
     const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      const code = e.code;
+      const key = e.key ? e.key.toLowerCase() : "";
+      const code = e.code || "";
       const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+
+      // Android Volume Down / Volume Up (used in Power + VolDown screenshot combinations)
+      if (
+        key === "volumedown" ||
+        code === "AudioVolumeDown" ||
+        e.keyCode === 174 ||
+        key === "volumeup" ||
+        code === "AudioVolumeUp" ||
+        e.keyCode === 175 ||
+        key === "volumemute" ||
+        e.keyCode === 173
+      ) {
+        // Blackout immediately when hardware volume key is pressed
+        triggerShield("Hardware screenshot combination intercepted", 3000);
+        showWarning("Hardware screenshot capture is disabled.");
+        return;
+      }
 
       // PrintScreen key (Windows & Linux)
       if (key === "printscreen" || code === "PrintScreen" || e.keyCode === 44) {
         e.preventDefault();
-        scrubClipboard();
-        setShieldReason("Screenshot key detected: Action blocked and logged");
-        setIsShieldActive(true);
+        triggerShield("Screenshot key intercepted", 2500);
         showWarning("Screenshots are strictly blocked on Notes Club.");
-        setTimeout(() => setIsShieldActive(false), 2000);
         return false;
       }
 
-      // Windows + Shift + S (Snipping Tool heuristic - Shift + S with Meta or keyup capture)
+      // Windows + Shift + S (Snipping Tool heuristic)
       if (isCtrlOrMeta && e.shiftKey && (key === "s" || code === "KeyS")) {
         e.preventDefault();
-        scrubClipboard();
-        setShieldReason("Screen snip combination detected: Action blocked");
-        setIsShieldActive(true);
+        triggerShield("Screen snip combination detected", 2500);
         showWarning("Screen snipping is strictly prohibited.");
-        setTimeout(() => setIsShieldActive(false), 2000);
         return false;
       }
 
       // Mac Screenshot Shortcuts: Cmd + Shift + 3, Cmd + Shift + 4, Cmd + Shift + 5
       if (e.metaKey && e.shiftKey && ["3", "4", "5", "$", "#", "%"].includes(key)) {
         e.preventDefault();
-        scrubClipboard();
-        setShieldReason("Screenshot command detected: Action blocked");
-        setIsShieldActive(true);
+        triggerShield("Screenshot command intercepted", 2500);
         showWarning("macOS screen capture is strictly prohibited.");
-        setTimeout(() => setIsShieldActive(false), 2000);
         return false;
       }
 
@@ -132,10 +142,9 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
         return false;
       }
 
-      // Block Ctrl+C / Cmd+C (Copy)
+      // Block Ctrl+C / Cmd+C (Copy - clean prevention without clipboard access)
       if (isCtrlOrMeta && (key === "c" || code === "KeyC")) {
         e.preventDefault();
-        scrubClipboard();
         showWarning("Copying text or content is strictly disabled.");
         return false;
       }
@@ -146,7 +155,7 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
         return false;
       }
 
-      // Block F12 and DevTools shortcuts (Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C)
+      // Block F12 and DevTools shortcuts
       if (
         key === "f12" ||
         code === "F12" ||
@@ -158,63 +167,63 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       }
     };
 
-    // 4. PrintScreen keyup listener (since some OS trigger snapshot on keyup)
+    // PrintScreen keyup listener
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === "PrintScreen" || e.code === "PrintScreen" || e.keyCode === 44) {
-        scrubClipboard();
-        setShieldReason("Screenshot action intercepted");
-        setIsShieldActive(true);
+        triggerShield("Screenshot action intercepted", 2000);
         showWarning("Screenshot intercepted. Content protected.");
-        setTimeout(() => setIsShieldActive(false), 2000);
       }
     };
 
-    // 5. Block Context Menu (Right Click & Android long-press)
+    // 3. Android Multi-Finger Gestures (3-Finger Swipe Screenshot)
+    // Must be non-passive to call preventDefault and abort Android gesture detection
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches && e.touches.length >= 3) {
+        // 3 or more fingers on screen = Android 3-finger screenshot gesture!
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        triggerShield("3-finger screenshot gesture intercepted", 2500);
+        showWarning("3-Finger screenshot gesture blocked.");
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches && e.touches.length >= 3) {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        triggerShield("3-finger swipe screenshot blocked", 2500);
+      }
+    };
+
+    // 4. Block Context Menu (Right Click & Android long-press selection menu)
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
       showWarning("Context menu and saving are disabled.");
       return false;
     };
 
-    // 6. Block Dragging (Canvas / Image / Text dragging)
+    // 5. Block Dragging
     const handleDragStart = (e: DragEvent) => {
       e.preventDefault();
       return false;
     };
 
-    // 7. Block Copy & Cut
+    // 6. Block Copy & Cut (NO clipboard writeText or clipboard read - just block!)
     const handleCopy = (e: ClipboardEvent) => {
       e.preventDefault();
-      scrubClipboard();
+      e.stopPropagation();
       showWarning("Copying content is disabled.");
     };
 
-    // 8. Android Touch Protections: Block Long Press Context Menu
-    let touchTimer: NodeJS.Timeout | null = null;
-    const handleTouchStart = (e: TouchEvent) => {
-      if (e.touches.length > 2) {
-        // Multi-finger screenshot gesture detection on Android (e.g. 3-finger swipe)
-        setIsShieldActive(true);
-        setTimeout(() => setIsShieldActive(false), 1500);
-      }
-      touchTimer = setTimeout(() => {
-        // Long press detected - cancel Android system popup
-        scrubClipboard();
-      }, 450);
+    const handleCut = (e: ClipboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showWarning("Cutting content is disabled.");
     };
 
-    const handleTouchEnd = () => {
-      if (touchTimer) clearTimeout(touchTimer);
-    };
-
-    const handleTouchMove = () => {
-      if (touchTimer) clearTimeout(touchTimer);
-    };
-
-    // 9. Poison Canvas Data Extraction (anti-canvas-scraping extensions)
+    // 7. Poison Canvas Data Extraction
     const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
     const originalToBlob = HTMLCanvasElement.prototype.toBlob;
-    const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
 
     try {
       HTMLCanvasElement.prototype.toDataURL = function () {
@@ -227,10 +236,10 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
         callback(emptyBlob);
       };
     } catch {
-      // Ignore prototype lock
+      // Ignore prototype freeze
     }
 
-    // Attach listeners
+    // Attach listeners with non-passive touch listeners for Android gesture cancellation
     window.addEventListener("blur", handleBlur);
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -239,10 +248,9 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
     window.addEventListener("contextmenu", handleContextMenu, true);
     window.addEventListener("dragstart", handleDragStart, true);
     document.addEventListener("copy", handleCopy, true);
-    document.addEventListener("cut", handleCopy, true);
-    window.addEventListener("touchstart", handleTouchStart, { passive: true });
-    window.addEventListener("touchend", handleTouchEnd, { passive: true });
-    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    document.addEventListener("cut", handleCut, true);
+    window.addEventListener("touchstart", handleTouchStart, { passive: false });
+    window.addEventListener("touchmove", handleTouchMove, { passive: false });
 
     return () => {
       window.removeEventListener("blur", handleBlur);
@@ -253,21 +261,21 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       window.removeEventListener("contextmenu", handleContextMenu, true);
       window.removeEventListener("dragstart", handleDragStart, true);
       document.removeEventListener("copy", handleCopy, true);
-      document.removeEventListener("cut", handleCopy, true);
+      document.removeEventListener("cut", handleCut, true);
       window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchend", handleTouchEnd);
       window.removeEventListener("touchmove", handleTouchMove);
 
-      // Restore canvas prototype
+      if (unshieldTimeoutRef.current) clearTimeout(unshieldTimeoutRef.current);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+
       try {
         HTMLCanvasElement.prototype.toDataURL = originalToDataURL;
         HTMLCanvasElement.prototype.toBlob = originalToBlob;
-        CanvasRenderingContext2D.prototype.getImageData = originalGetImageData;
       } catch {
         // Ignore
       }
     };
-  }, [scrubClipboard, showWarning]);
+  }, [triggerShield, showWarning]);
 
   return (
     <div
@@ -278,20 +286,22 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
         WebkitTouchCallout: "none",
       }}
     >
-      {/* Underlying Content */}
+      {/* Underlying Content: instantly zeroed and blurred when shield triggers */}
       <div
-        className={`w-full h-full transition-all duration-150 ${
-          isShieldActive ? "blur-2xl opacity-10 pointer-events-none filter scale-[0.98]" : "opacity-100"
+        className={`w-full h-full transition-all duration-100 ${
+          isShieldActive
+            ? "blur-3xl opacity-0 pointer-events-none filter scale-[0.95]"
+            : "opacity-100 filter-none"
         }`}
       >
         {children}
       </div>
 
-      {/* Screen Capture / Backgrounding Blackout Curtain */}
+      {/* Screen Capture / Gesture Blackout Curtain */}
       {isShieldActive && (
         <div
           onClick={() => setIsShieldActive(false)}
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/95 text-white p-6 text-center select-none cursor-pointer backdrop-blur-3xl animate-in fade-in duration-100"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black text-white p-6 text-center select-none cursor-pointer backdrop-blur-3xl animate-in fade-in duration-75"
         >
           <div className="relative mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 shadow-2xl">
             <Lock className="h-8 w-8 animate-pulse text-red-400" />
@@ -302,8 +312,7 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
           </h2>
 
           <p className="max-w-md text-xs sm:text-sm text-zinc-400 leading-relaxed mb-6">
-            {shieldReason}. For security, content is hidden while the reader window is
-            unfocused or an external capture tool is active.
+            {shieldReason}. Screenshots and screen capture are strictly blocked on Notes Club to protect author rights.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center gap-2 text-[11px] font-mono text-zinc-500 bg-zinc-900/80 px-4 py-2 rounded-xl border border-zinc-800">
