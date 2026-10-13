@@ -335,8 +335,8 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
 
         let computedScale = scale;
         if (containerWidth < 768) {
-          // Google Drive mobile view: maximize reading area edge-to-edge
-          const fitWidthScale = containerWidth / baseViewport.width;
+          // Mobile reading: crisp fit with comfortable margins
+          const fitWidthScale = Math.min((containerWidth - 24) / baseViewport.width, 1.25);
           computedScale = fitWidthScale * scale;
         } else {
           // Desktop: generous reading page width
@@ -752,12 +752,9 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
           </div>
         </header>
 
-        {/* 2. Main Reading Viewport - Edge-to-Edge on Mobile like Google Drive */}
+        {/* 2. Main Reading Viewport */}
         <main
-          className="relative flex-1 overflow-auto bg-[#09090b] flex items-start sm:items-center justify-center p-0 sm:p-6"
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
+          className="relative flex-1 overflow-auto bg-[#09090b] flex items-center justify-center p-2 sm:p-6"
           onClick={() => {
             if (isDrawerOpen) setIsDrawerOpen(false);
           }}
@@ -783,13 +780,12 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
             </div>
           ) : docFormat === "pdf" ? (
             /* PDF Canvas Viewport with Gesture Support & Tone Filter */
-            <div className="relative shadow-2xl transition-all duration-150 mx-auto my-0 sm:my-4 flex items-center justify-center w-full sm:w-auto">
+            <div className="relative shadow-2xl transition-all duration-150">
               <canvas
                 ref={canvasRef}
-                className={`block transition-all duration-150 ${toneFilterClass}`}
+                className={`block rounded-sm transition-all duration-150 ${toneFilterClass}`}
                 style={{
                   boxShadow: "0 10px 40px rgba(0, 0, 0, 0.7)",
-                  maxWidth: "none",
                 }}
               />
               {showWatermark && (

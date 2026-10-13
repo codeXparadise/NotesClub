@@ -34,23 +34,10 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
     }, 3500);
   }, []);
 
-  // Synchronous DOM-level blackout to beat Android GPU framebuffer capture
+  // Synchronous DOM-level blackout to beat screenshot capture
   const applyHardBlackout = useCallback((reason: string, durationMs = 2500) => {
     if (typeof document !== "undefined") {
       document.documentElement.classList.add("secure-screen-blackout");
-      const canvases = document.querySelectorAll<HTMLCanvasElement>("canvas");
-      canvases.forEach((c) => {
-        try {
-          const ctx = c.getContext("2d");
-          if (ctx) {
-            ctx.fillStyle = "#000000";
-            ctx.fillRect(0, 0, c.width, c.height);
-          }
-        } catch {}
-        c.style.setProperty("opacity", "0", "important");
-        c.style.setProperty("visibility", "hidden", "important");
-        c.style.setProperty("display", "none", "important");
-      });
     }
 
     setShieldReason(reason);
@@ -59,109 +46,81 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
     if (unshieldTimeoutRef.current) clearTimeout(unshieldTimeoutRef.current);
     if (durationMs > 0) {
       unshieldTimeoutRef.current = setTimeout(() => {
-        document.documentElement.classList.remove("secure-screen-blackout");
-        const canvases = document.querySelectorAll<HTMLCanvasElement>("canvas");
-        canvases.forEach((c) => {
-          c.style.removeProperty("opacity");
-          c.style.removeProperty("visibility");
-          c.style.removeProperty("display");
-        });
+        if (typeof document !== "undefined") {
+          document.documentElement.classList.remove("secure-screen-blackout");
+        }
         setIsShieldActive(false);
-        window.dispatchEvent(new CustomEvent("notesclub:security-restore"));
       }, durationMs);
     }
   }, []);
 
-  const removeHardBlackout = useCallback((delayMs = 1200) => {
+  const removeHardBlackout = useCallback((delayMs = 0) => {
     if (unshieldTimeoutRef.current) clearTimeout(unshieldTimeoutRef.current);
-    unshieldTimeoutRef.current = setTimeout(() => {
+    const execute = () => {
       if (typeof document !== "undefined") {
         document.documentElement.classList.remove("secure-screen-blackout");
-        const canvases = document.querySelectorAll<HTMLCanvasElement>("canvas");
-        canvases.forEach((c) => {
-          c.style.removeProperty("opacity");
-          c.style.removeProperty("visibility");
-          c.style.removeProperty("display");
-        });
       }
       setIsShieldActive(false);
-      window.dispatchEvent(new CustomEvent("notesclub:security-restore"));
-    }, delayMs);
+    };
+    if (delayMs > 0) {
+      unshieldTimeoutRef.current = setTimeout(execute, delayMs);
+    } else {
+      execute();
+    }
   }, []);
 
   useEffect(() => {
-    // 1. Android & Desktop Blur, PageHide, Visibility Change & Focus Loss
-    // Defeats Power+VolDown hardware combination, Notification shade screenshot tile,
-    // Google Assistant voice screenshots, and Samsung Edge Panel.
+    // 1. Android & Desktop Blur, PageHide, Visibility Change
+    // Defeats system screenshot flash, notification shade screenshot, assistant overlay
     const handleBlur = () => {
-      applyHardBlackout("Content shielded: Screenshot service or backgrounding active", 2500);
+      applyHardBlackout("Screen capture or window backgrounding detected", 2000);
     };
 
     const handleFocus = () => {
-      // Delay unshielding by 1.2s to guarantee the OS capture animation has exited
-      removeHardBlackout(1200);
+      removeHardBlackout(300);
     };
 
     const handlePageHide = () => {
-      applyHardBlackout("Content shielded: Page backgrounded", 2500);
-    };
-
-    const handleFocusOut = () => {
-      applyHardBlackout("Content shielded: Window focus lost", 2500);
-    };
-
-    const handleTouchCancel = () => {
-      applyHardBlackout("Hardware screenshot or gesture interrupted session", 2500);
-    };
-
-    const handlePointerCancel = () => {
-      applyHardBlackout("System overlay or hardware button capture detected", 2500);
+      applyHardBlackout("Page backgrounded", 2000);
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
-        applyHardBlackout("Content shielded: Screen backgrounded or captured", 2500);
+        applyHardBlackout("Screen capture or window backgrounding detected", 2000);
       } else {
-        removeHardBlackout(1200);
+        removeHardBlackout(300);
       }
     };
 
     // 2. Hardware Button Combinations & Keyboard Screenshot Keys
     const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key ? e.key.toLowerCase() : "";
-      const code = e.code || "";
-      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+      const key = (e.key || "").toLowerCase();
+      const code = (e.code || "").toLowerCase();
       const keyCode = e.keyCode || e.which || 0;
+      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
 
-      // Android Hardware Keys:
-      // 24 = Volume Up (Android KeyEvent.KEYCODE_VOLUME_UP)
-      // 25 = Volume Down (Android KeyEvent.KEYCODE_VOLUME_DOWN)
-      // 26 = Power (Android KeyEvent.KEYCODE_POWER)
-      // 173 = Volume Mute, 174 = AudioVolumeDown, 175 = AudioVolumeUp
-      // 27 = Camera key, 79 = Headset key, 82 = Menu key
+      // Android Hardware Volume & Power Keys:
+      // KEYCODE_VOLUME_UP (24), KEYCODE_VOLUME_DOWN (25), KEYCODE_POWER (26)
+      // AudioVolumeDown (174), AudioVolumeUp (175), VolumeMute (173)
       if (
+        key.includes("volume") ||
+        code.includes("volume") ||
+        key.includes("power") ||
+        code.includes("power") ||
         keyCode === 24 ||
         keyCode === 25 ||
         keyCode === 26 ||
         keyCode === 174 ||
         keyCode === 175 ||
-        keyCode === 173 ||
-        keyCode === 27 ||
-        keyCode === 82 ||
-        key === "volumedown" ||
-        key === "volumeup" ||
-        key === "power" ||
-        code === "AudioVolumeDown" ||
-        code === "AudioVolumeUp" ||
-        code === "Power"
+        keyCode === 173
       ) {
-        applyHardBlackout("Hardware screenshot combination intercepted", 3000);
+        applyHardBlackout("Hardware screenshot combination intercepted", 2500);
         showWarning("Hardware screenshot capture is blocked.");
         return;
       }
 
       // PrintScreen key (Windows & Linux)
-      if (key === "printscreen" || code === "PrintScreen" || keyCode === 44) {
+      if (key === "printscreen" || code === "printscreen" || keyCode === 44) {
         e.preventDefault();
         applyHardBlackout("Screenshot key intercepted", 2500);
         showWarning("Screenshots are strictly blocked on Notes Club.");
@@ -169,7 +128,7 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       }
 
       // Windows + Shift + S (Snipping Tool heuristic)
-      if (isCtrlOrMeta && e.shiftKey && (key === "s" || code === "KeyS")) {
+      if (isCtrlOrMeta && e.shiftKey && (key === "s" || code === "keys")) {
         e.preventDefault();
         applyHardBlackout("Screen snip combination detected", 2500);
         showWarning("Screen snipping is strictly prohibited.");
@@ -185,34 +144,34 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       }
 
       // Block Ctrl+S / Cmd+S (Save page / download)
-      if (isCtrlOrMeta && (key === "s" || code === "KeyS")) {
+      if (isCtrlOrMeta && (key === "s" || code === "keys")) {
         e.preventDefault();
         showWarning("Downloading file content is strictly disabled.");
         return false;
       }
 
       // Block Ctrl+P / Cmd+P (Print page / save as PDF)
-      if (isCtrlOrMeta && (key === "p" || code === "KeyP")) {
+      if (isCtrlOrMeta && (key === "p" || code === "keyp")) {
         e.preventDefault();
         showWarning("Printing or exporting to PDF is strictly disabled.");
         return false;
       }
 
       // Block Ctrl+U / Cmd+U (View page source)
-      if (isCtrlOrMeta && (key === "u" || code === "KeyU")) {
+      if (isCtrlOrMeta && (key === "u" || code === "keyu")) {
         e.preventDefault();
         return false;
       }
 
-      // Block Ctrl+C / Cmd+C (Copy - clean prevention without clipboard access)
-      if (isCtrlOrMeta && (key === "c" || code === "KeyC")) {
+      // Block Ctrl+C / Cmd+C (Copy)
+      if (isCtrlOrMeta && (key === "c" || code === "keyc")) {
         e.preventDefault();
         showWarning("Copying text or content is strictly disabled.");
         return false;
       }
 
       // Block Ctrl+A / Cmd+A (Select All)
-      if (isCtrlOrMeta && (key === "a" || code === "KeyA")) {
+      if (isCtrlOrMeta && (key === "a" || code === "keya")) {
         e.preventDefault();
         return false;
       }
@@ -220,7 +179,7 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       // Block F12 and DevTools shortcuts
       if (
         key === "f12" ||
-        code === "F12" ||
+        code === "f12" ||
         (isCtrlOrMeta && e.shiftKey && ["i", "j", "c"].includes(key))
       ) {
         e.preventDefault();
@@ -229,72 +188,37 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       }
     };
 
-    // PrintScreen keyup listener, volume keys, and power keyup
+    // Keyup listener for hardware buttons & printscreen
     const handleKeyUp = (e: KeyboardEvent) => {
+      const key = (e.key || "").toLowerCase();
+      const code = (e.code || "").toLowerCase();
       const keyCode = e.keyCode || e.which || 0;
-      const key = e.key ? e.key.toLowerCase() : "";
-      const code = e.code || "";
       if (
-        e.key === "PrintScreen" ||
-        e.code === "PrintScreen" ||
+        key.includes("volume") ||
+        code.includes("volume") ||
+        key.includes("power") ||
+        code.includes("power") ||
+        key === "printscreen" ||
+        code === "printscreen" ||
         keyCode === 44 ||
         keyCode === 24 ||
         keyCode === 25 ||
         keyCode === 26 ||
         keyCode === 174 ||
-        keyCode === 175 ||
-        key === "volumedown" ||
-        key === "volumeup" ||
-        key === "power" ||
-        code === "AudioVolumeDown" ||
-        code === "AudioVolumeUp" ||
-        code === "Power"
+        keyCode === 175
       ) {
-        applyHardBlackout("Screenshot action intercepted", 2500);
+        applyHardBlackout("Screenshot key intercepted", 2500);
         showWarning("Screenshot intercepted. Content protected.");
       }
     };
 
-    // 3. Android Touch Gestures (3-Finger Swipe, Palm Swipe, Status bar, Edge panels)
+    // 3. Android Touch Gestures: Only block 3 or more fingers (3-Finger Swipe Screenshot)
     const handleTouchStart = (e: TouchEvent) => {
-      if (e.touches && e.touches.length > 0) {
-        // Status Bar Pull-Down Detection (Quick settings screenshot tile)
-        if (e.touches[0].clientY < 40) {
-          applyHardBlackout("Status bar capture attempt detected", 2500);
-          return;
-        }
-
-        // Edge Panel / Smart Sidebar Swipe Detection
-        if (
-          e.touches[0].clientX < 16 ||
-          e.touches[0].clientX > window.innerWidth - 16
-        ) {
-          applyHardBlackout("Edge panel capture attempt detected", 2500);
-          return;
-        }
-
-        // 3 or more fingers (3-finger screenshot gesture)
-        if (e.touches.length >= 3) {
-          if (e.cancelable) e.preventDefault();
-          e.stopPropagation();
-          applyHardBlackout("3-finger screenshot gesture intercepted", 2500);
-          showWarning("3-Finger screenshot gesture blocked.");
-          return;
-        }
-
-        // Palm swipe capture (Samsung: touch radiusX or radiusY > 20px or contact area)
-        for (let i = 0; i < e.touches.length; i++) {
-          const t = e.touches[i];
-          const rx = t.radiusX || 0;
-          const ry = t.radiusY || 0;
-          if (rx > 20 || ry > 20 || rx * ry > 250) {
-            if (e.cancelable) e.preventDefault();
-            e.stopPropagation();
-            applyHardBlackout("Palm swipe gesture intercepted", 2500);
-            showWarning("Palm swipe screenshot blocked.");
-            return;
-          }
-        }
+      if (e.touches && e.touches.length >= 3) {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        applyHardBlackout("3-Finger screenshot gesture blocked", 2500);
+        showWarning("3-Finger screenshot gesture blocked.");
       }
     };
 
@@ -302,7 +226,7 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       if (e.touches && e.touches.length >= 3) {
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
-        applyHardBlackout("3-finger swipe screenshot blocked", 2500);
+        applyHardBlackout("3-Finger screenshot gesture blocked", 2500);
       }
     };
 
@@ -318,7 +242,7 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       return false;
     };
 
-    // 5. Block Copy & Cut (NO clipboard access)
+    // 5. Block Copy & Cut
     const handleCopy = (e: ClipboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -349,13 +273,10 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       // Ignore prototype freeze
     }
 
-    // Attach listeners with non-passive touch listeners for immediate cancellation
+    // Attach listeners
     window.addEventListener("blur", handleBlur);
     window.addEventListener("focus", handleFocus);
     window.addEventListener("pagehide", handlePageHide);
-    window.addEventListener("focusout", handleFocusOut, true);
-    window.addEventListener("touchcancel", handleTouchCancel, true);
-    window.addEventListener("pointercancel", handlePointerCancel, true);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener("keyup", handleKeyUp, true);
@@ -370,9 +291,6 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("pagehide", handlePageHide);
-      window.removeEventListener("focusout", handleFocusOut, true);
-      window.removeEventListener("touchcancel", handleTouchCancel, true);
-      window.removeEventListener("pointercancel", handlePointerCancel, true);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("keyup", handleKeyUp, true);
