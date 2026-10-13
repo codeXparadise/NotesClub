@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense, useRef } from "react";
+import React, { useState, useEffect, Suspense, useRef, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -40,6 +40,343 @@ interface CollegeItem {
   district: string;
 }
 
+interface DegreeItem {
+  id: string;
+  name: string;
+  shortName: string;
+  category: "engineering" | "science" | "commerce" | "management" | "arts" | "junior_college" | "school";
+  level: "ug" | "pg" | "junior_college" | "school";
+  specializations: string[];
+}
+
+const DEGREES_DATA: DegreeItem[] = [
+  // UG Degrees
+  {
+    id: "bsc",
+    name: "B.Sc (Bachelor of Science)",
+    shortName: "B.Sc",
+    category: "science",
+    level: "ug",
+    specializations: [
+      "Artificial Intelligence (AI)",
+      "Data Science (DS)",
+      "Cyber Security",
+      "Computer Science (CS)",
+      "Information Technology (IT)",
+      "Mathematics & Computing",
+      "Biotechnology",
+      "Physics & Electronics",
+      "Chemistry",
+      "General Science",
+    ],
+  },
+  {
+    id: "btech",
+    name: "B.Tech / B.E (Engineering & Tech)",
+    shortName: "B.Tech",
+    category: "engineering",
+    level: "ug",
+    specializations: [
+      "Computer Science (CSE)",
+      "Artificial Intelligence & Machine Learning (AI & ML)",
+      "Data Science (DS)",
+      "Cyber Security & Forensics",
+      "Information Technology (IT)",
+      "Electronics & Communication (ECE)",
+      "Electrical & Electronics (EEE)",
+      "Mechanical Engineering (ME)",
+      "Civil Engineering (CE)",
+      "Robotics & Automation",
+      "Biotechnology",
+      "Chemical Engineering",
+    ],
+  },
+  {
+    id: "bca",
+    name: "BCA (Bachelor of Computer Applications)",
+    shortName: "BCA",
+    category: "engineering",
+    level: "ug",
+    specializations: [
+      "Artificial Intelligence (AI)",
+      "Data Science & Analytics",
+      "Cyber Security & Ethical Hacking",
+      "Cloud Computing & DevOps",
+      "Full Stack Development",
+      "General Computer Applications",
+    ],
+  },
+  {
+    id: "bcom",
+    name: "B.Com (Bachelor of Commerce)",
+    shortName: "B.Com",
+    category: "commerce",
+    level: "ug",
+    specializations: [
+      "Business Analytics & AI",
+      "Accounting & Finance (A&F)",
+      "Banking & Insurance (B&I)",
+      "Financial Markets (FM)",
+      "E-Commerce & Digital Marketing",
+      "Taxation & Auditing",
+      "General Commerce",
+    ],
+  },
+  {
+    id: "bba",
+    name: "BBA / BMS (Business Administration)",
+    shortName: "BBA",
+    category: "management",
+    level: "ug",
+    specializations: [
+      "Business Analytics & Big Data",
+      "Digital Marketing & E-Commerce",
+      "Finance & Investment Banking",
+      "Human Resource Management (HR)",
+      "International Business",
+      "Supply Chain & Logistics",
+      "General Management",
+    ],
+  },
+  {
+    id: "ba",
+    name: "B.A (Bachelor of Arts)",
+    shortName: "B.A",
+    category: "arts",
+    level: "ug",
+    specializations: [
+      "Economics & Econometrics",
+      "Psychology & Behavioral Studies",
+      "English Literature",
+      "Journalism & Mass Media",
+      "Political Science & Public Policy",
+      "Sociology",
+      "General Arts",
+    ],
+  },
+
+  // PG Degrees
+  {
+    id: "mtech",
+    name: "M.Tech / M.E (Masters in Technology)",
+    shortName: "M.Tech",
+    category: "engineering",
+    level: "pg",
+    specializations: [
+      "Artificial Intelligence & Machine Learning",
+      "Data Science & Analytics",
+      "Cyber Security & Information Assurance",
+      "Computer Science & Engineering (CSE)",
+      "VLSI Design & Embedded Systems",
+      "Thermal / Structural Engineering",
+    ],
+  },
+  {
+    id: "msc",
+    name: "M.Sc (Master of Science)",
+    shortName: "M.Sc",
+    category: "science",
+    level: "pg",
+    specializations: [
+      "Artificial Intelligence & Data Science",
+      "Computer Science (CS)",
+      "Cyber Security",
+      "Information Technology (IT)",
+      "Applied Mathematics & Computing",
+      "Biotechnology & Bioinformatics",
+      "Physics / Chemistry",
+    ],
+  },
+  {
+    id: "mca",
+    name: "MCA (Master of Computer Applications)",
+    shortName: "MCA",
+    category: "engineering",
+    level: "pg",
+    specializations: [
+      "AI & Deep Learning",
+      "Cloud Architecture & DevOps",
+      "Cyber Security & Cryptography",
+      "Enterprise Software Engineering",
+      "General MCA",
+    ],
+  },
+  {
+    id: "mba",
+    name: "MBA / PGDM (Master of Business Admin)",
+    shortName: "MBA",
+    category: "management",
+    level: "pg",
+    specializations: [
+      "Business Analytics & AI",
+      "Finance & Wealth Management",
+      "Marketing & Brand Growth",
+      "Operations & Supply Chain",
+      "Human Resource Management (HR)",
+      "Information Technology (IT)",
+    ],
+  },
+  {
+    id: "mcom",
+    name: "M.Com (Master of Commerce)",
+    shortName: "M.Com",
+    category: "commerce",
+    level: "pg",
+    specializations: [
+      "Banking & Financial Analytics",
+      "Advanced Accounting & Taxation",
+      "Business Economics",
+    ],
+  },
+  {
+    id: "ma",
+    name: "M.A (Master of Arts)",
+    shortName: "M.A",
+    category: "arts",
+    level: "pg",
+    specializations: [
+      "Economics",
+      "Psychology",
+      "English Literature",
+      "Mass Communication & Journalism",
+      "Political Science",
+    ],
+  },
+
+  // Junior College (11th & 12th)
+  {
+    id: "jc_science",
+    name: "11th / 12th Science (Junior College)",
+    shortName: "11-12th Science",
+    category: "junior_college",
+    level: "junior_college",
+    specializations: [
+      "PCM with Computer Science / AI",
+      "PCM with Information Technology",
+      "PCB (Medical / Biology)",
+      "PCMB (General Science)",
+    ],
+  },
+  {
+    id: "jc_commerce",
+    name: "11th / 12th Commerce (Junior College)",
+    shortName: "11-12th Commerce",
+    category: "junior_college",
+    level: "junior_college",
+    specializations: [
+      "Commerce with Mathematics & IT",
+      "Commerce with Secretarial Practice (SP)",
+      "General Commerce & Banking",
+    ],
+  },
+  {
+    id: "jc_arts",
+    name: "11th / 12th Arts & Humanities",
+    shortName: "11-12th Arts",
+    category: "junior_college",
+    level: "junior_college",
+    specializations: [
+      "Economics & Psychology",
+      "Sociology & Political Science",
+      "General Arts",
+    ],
+  },
+
+  // School
+  {
+    id: "school_sec",
+    name: "Secondary School (6th - 10th)",
+    shortName: "School",
+    category: "school",
+    level: "school",
+    specializations: [
+      "General Curriculum (All Subjects)",
+      "Class 9th Foundation",
+      "Class 10th Board Exam Prep",
+    ],
+  },
+];
+
+function getCollegeCategories(collegeName: string): Set<string> {
+  const upper = (collegeName || "").toUpperCase();
+  const cats = new Set<string>();
+
+  if (!upper) return new Set(["all"]);
+
+  const isEngineering =
+    upper.includes("ENGINEERING") ||
+    upper.includes("TECHNOLOGY") ||
+    upper.includes("POLYTECHNIC") ||
+    upper.includes("TECHNICAL") ||
+    upper.includes("IIIT") ||
+    upper.includes("IIT") ||
+    upper.includes("NIT") ||
+    upper.includes("TECH");
+
+  const isManagement =
+    upper.includes("MANAGEMENT") ||
+    upper.includes("BUSINESS") ||
+    upper.includes("MBA") ||
+    upper.includes("COMMERCE") ||
+    upper.includes("B-SCHOOL") ||
+    upper.includes("FINANCE");
+
+  const isScience =
+    upper.includes("SCIENCE") ||
+    upper.includes("RESEARCH") ||
+    upper.includes("DEGREE COLLEGE") ||
+    upper.includes("UNIVERSITY") ||
+    upper.includes("CAMPUS") ||
+    upper.includes("INSTITUTE");
+
+  const isArts =
+    upper.includes("ARTS") ||
+    upper.includes("HUMANITIES") ||
+    upper.includes("DEGREE COLLEGE") ||
+    upper.includes("UNIVERSITY") ||
+    upper.includes("MAHAVIDYALAYA");
+
+  const isSchool =
+    upper.includes("SCHOOL") ||
+    upper.includes("JUNIOR") ||
+    upper.includes("INTERMEDIATE") ||
+    upper.includes("VIDYALAYA");
+
+  if (isEngineering) {
+    cats.add("engineering");
+    cats.add("science");
+  }
+  if (isManagement) {
+    cats.add("commerce");
+    cats.add("management");
+  }
+  if (isScience) {
+    cats.add("science");
+    cats.add("engineering");
+  }
+  if (isArts) {
+    cats.add("arts");
+    cats.add("commerce");
+  }
+  if (isSchool) {
+    cats.add("junior_college");
+    cats.add("school");
+  }
+
+  if (
+    cats.size === 0 ||
+    upper.includes("UNIVERSITY") ||
+    upper.includes("DEGREE COLLEGE") ||
+    upper.includes("MAHAVIDYALAYA") ||
+    upper.includes("GROUP OF INSTITUTIONS") ||
+    upper.includes("CAMPUS")
+  ) {
+    return new Set(["all"]);
+  }
+
+  return cats;
+}
+
 function AuthForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -64,6 +401,7 @@ function AuthForm() {
   const [forgotOtp, setForgotOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [hasRecoverySession, setHasRecoverySession] = useState(false);
+  const [showCodeInput, setShowCodeInput] = useState(false);
 
   // Register form state
   const [regFullName, setRegFullName] = useState("");
@@ -71,8 +409,10 @@ function AuthForm() {
   const [regEmail, setRegEmail] = useState("");
   const [regPassword, setRegPassword] = useState("");
   const [educationLevel, setEducationLevel] = useState<"school" | "junior_college" | "ug" | "pg">("ug");
-  const [stream, setStream] = useState("Engineering (B.Tech / B.E)");
-  const [yearOrClass, setYearOrClass] = useState("1st Year");
+  const [selectedDegreeId, setSelectedDegreeId] = useState("bsc");
+  const [selectedSpecialization, setSelectedSpecialization] = useState("Artificial Intelligence (AI)");
+  const [showAllDegrees, setShowAllDegrees] = useState(false);
+  const [yearOrClass, setYearOrClass] = useState("FY");
 
   // College search combobox state
   const [collegeSearch, setCollegeSearch] = useState("");
@@ -178,46 +518,73 @@ function AuthForm() {
     };
   }, [searchParams, supabase]);
 
-  // Stream options based on education level
-  const streamOptions = {
-    school: ["General (All Subjects)", "Class 9th Foundation", "Class 10th Board"],
-    junior_college: [
-      "Science (PCM - Physics, Chem, Math)",
-      "Science (PCB - Physics, Chem, Biology)",
-      "Science (PCMB - All Sciences)",
-      "Commerce (Accounts, Math, Eco)",
-      "Arts & Humanities",
-    ],
-    ug: [
-      "Engineering & Tech (B.Tech / B.E)",
-      "Computer Applications (BCA / B.Sc CS)",
-      "Science (B.Sc General)",
-      "Commerce & Business (B.Com / BBA)",
-      "Arts & Humanities (B.A)",
-      "Medical & Dental (MBBS / BDS)",
-      "Pharmacy (B.Pharm)",
-      "Law (LL.B / B.A. LL.B)",
-    ],
-    pg: [
-      "Technology & Engineering (M.Tech / M.E)",
-      "Computer Science & MCA",
-      "Science (M.Sc)",
-      "Business Administration (MBA / PGDM)",
-      "Commerce (M.Com)",
-      "Arts & Humanities (M.A)",
-      "Law (LL.M)",
-    ],
-  }[educationLevel];
+  // College-inferred stream categories
+  const collegeCategories = useMemo(
+    () => getCollegeCategories(selectedCollege || collegeSearch),
+    [selectedCollege, collegeSearch]
+  );
 
-  // Year options based on level
+  // Available degrees filtered by college stream categories and education level
+  const availableDegrees = useMemo(() => {
+    return DEGREES_DATA.filter((deg) => {
+      if (showAllDegrees) return true;
+      if (deg.level !== educationLevel) return false;
+      if (collegeCategories.has("all")) return true;
+      return collegeCategories.has(deg.category);
+    });
+  }, [educationLevel, collegeCategories, showAllDegrees]);
+
+  // Current degree item
+  const currentDegree = useMemo(() => {
+    return (
+      availableDegrees.find((d) => d.id === selectedDegreeId) ||
+      availableDegrees[0] ||
+      DEGREES_DATA.find((d) => d.id === selectedDegreeId) ||
+      DEGREES_DATA[0]
+    );
+  }, [availableDegrees, selectedDegreeId]);
+
+  // Specializations for currently selected degree
+  const availableSpecializations = useMemo(() => {
+    return currentDegree?.specializations || [];
+  }, [currentDegree]);
+
+  // Combined stream string (e.g. "B.Sc - AI" or "B.Tech - Cyber Security")
+  const combinedCourse = useMemo(() => {
+    if (!currentDegree) return "General";
+    return `${currentDegree.shortName} - ${selectedSpecialization}`;
+  }, [currentDegree, selectedSpecialization]);
+
+  // Sync selected specialization when degree changes
+  useEffect(() => {
+    if (currentDegree && !currentDegree.specializations.includes(selectedSpecialization)) {
+      setSelectedSpecialization(currentDegree.specializations[0] || "General");
+    }
+  }, [currentDegree, selectedSpecialization]);
+
+  // When education level changes, pick a relevant degree
+  useEffect(() => {
+    const match = DEGREES_DATA.find((d) => d.level === educationLevel);
+    if (match) {
+      setSelectedDegreeId(match.id);
+      setSelectedSpecialization(match.specializations[0] || "General");
+    }
+    if (educationLevel === "school") {
+      setYearOrClass("Class 9");
+    } else if (educationLevel === "junior_college") {
+      setYearOrClass("FY (11th)");
+    } else {
+      setYearOrClass("FY");
+    }
+  }, [educationLevel]);
+
+  // Year options based on level: FY, SY, TY, Final Year
   const yearOptions =
     educationLevel === "school"
       ? ["Class 6", "Class 7", "Class 8", "Class 9", "Class 10"]
       : educationLevel === "junior_college"
-      ? ["11th Standard", "12th Standard"]
-      : educationLevel === "ug"
-      ? ["1st Year", "2nd Year", "3rd Year", "4th Year", "Final Year"]
-      : ["1st Year (Junior)", "2nd Year (Final)"];
+      ? ["FY (11th)", "SY (12th)"]
+      : ["FY", "SY", "TY", "Final Year"];
 
   const switchTab = (tab: "login" | "register") => {
     setActiveTab(tab);
@@ -278,7 +645,7 @@ function AuthForm() {
     e.preventDefault();
     const cleanEmail = loginEmail.trim().toLowerCase();
     if (!cleanEmail) {
-      setError("Please enter your student email address.");
+      setError("Please enter your email address.");
       return;
     }
 
@@ -287,7 +654,14 @@ function AuthForm() {
     setInfoMessage(null);
 
     try {
-      const appOrigin = typeof window !== "undefined" ? window.location.origin : "";
+      const productionUrl = "https://notes-club.netlify.app";
+      const appOrigin =
+        typeof window !== "undefined" &&
+        window.location.protocol === "https:" &&
+        !window.location.hostname.includes("localhost")
+          ? window.location.origin
+          : productionUrl;
+
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
@@ -355,7 +729,7 @@ function AuthForm() {
     }
   };
 
-  // 4. Send Forgot Password Recovery OTP
+  // 4. Send Forgot Password Recovery Magic Link
   const handleSendForgotOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = forgotEmail.trim().toLowerCase();
@@ -369,7 +743,15 @@ function AuthForm() {
     setInfoMessage(null);
 
     try {
-      const appOrigin = typeof window !== "undefined" ? window.location.origin : "";
+      // Production URL prevents Supabase from ever defaulting to localhost:3000
+      const productionUrl = "https://notes-club.netlify.app";
+      const appOrigin =
+        typeof window !== "undefined" &&
+        window.location.protocol === "https:" &&
+        !window.location.hostname.includes("localhost")
+          ? window.location.origin
+          : productionUrl;
+
       const { error: resetErr } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
         redirectTo: `${appOrigin}/auth/callback?next=${encodeURIComponent("/login?recovery=true")}`,
       });
@@ -377,9 +759,9 @@ function AuthForm() {
       if (resetErr) throw resetErr;
 
       setForgotOtpSent(true);
-      setInfoMessage("Password reset code sent! Check your email for the 6-digit recovery code or click the reset link.");
+      setInfoMessage(`Password reset link sent to ${cleanEmail}! Please check your email.`);
     } catch (err: any) {
-      setError(err.message || "Failed to send recovery code.");
+      setError(err.message || "Failed to send password reset email.");
     } finally {
       setIsLoading(false);
     }
@@ -473,8 +855,8 @@ function AuthForm() {
           courseId: regCourseId || null,
           collegeName: cleanCollege || "Not Specified",
           educationLevel,
-          stream,
-          courseName: stream,
+          stream: combinedCourse,
+          courseName: combinedCourse,
           yearOrClass,
         }),
       });
@@ -640,7 +1022,7 @@ function AuthForm() {
               <form onSubmit={handlePasswordLogin} className="space-y-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                    Student Email
+                    Email
                   </label>
                   <div className="relative">
                     <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
@@ -648,7 +1030,7 @@ function AuthForm() {
                       type="email"
                       value={loginEmail}
                       onChange={(e) => setLoginEmail(e.target.value)}
-                      placeholder="student@university.edu"
+                      placeholder="name@example.com"
                       required
                       className="pl-10 h-11 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700"
                     />
@@ -706,7 +1088,7 @@ function AuthForm() {
                   <form onSubmit={handleSendLoginOtp} className="space-y-4">
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                        Student Email
+                        Email
                       </label>
                       <div className="relative">
                         <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
@@ -714,7 +1096,7 @@ function AuthForm() {
                           type="email"
                           value={loginEmail}
                           onChange={(e) => setLoginEmail(e.target.value)}
-                          placeholder="student@university.edu"
+                          placeholder="name@example.com"
                           required
                           className="pl-10 h-11 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700"
                         />
@@ -788,14 +1170,14 @@ function AuthForm() {
               </div>
             )}
 
-            {/* Mode C: Forgot Password via OTP Recovery */}
+            {/* Mode C: Forgot Password via Magic Link & Recovery */}
             {loginMode === "forgot" && (
               <div className="space-y-4">
                 {!forgotOtpSent ? (
                   <form onSubmit={handleSendForgotOtp} className="space-y-4">
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                        Registered Email
+                        Email
                       </label>
                       <div className="relative">
                         <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
@@ -803,13 +1185,13 @@ function AuthForm() {
                           type="email"
                           value={forgotEmail}
                           onChange={(e) => setForgotEmail(e.target.value)}
-                          placeholder="student@university.edu"
+                          placeholder="name@example.com"
                           required
                           className="pl-10 h-11 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700"
                         />
                       </div>
                       <p className="text-[11px] text-zinc-500">
-                        Enter your registered email to receive a password reset verification code.
+                        Enter your registered email address. We will send you a secure magic link to reset your password.
                       </p>
                     </div>
 
@@ -822,68 +1204,129 @@ function AuthForm() {
                       {isLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <span>Send Reset Code &rarr;</span>
+                        <span>Send Reset Link &rarr;</span>
                       )}
                     </Button>
                   </form>
                 ) : (
                   <form onSubmit={handleVerifyForgotOtp} className="space-y-4 animate-in fade-in">
                     {hasRecoverySession ? (
-                      <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4 shrink-0" />
-                        <span>Email recovery link verified! Set your new password below.</span>
+                      <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2.5">
+                        <CheckCircle2 className="h-5 w-5 shrink-0" />
+                        <div>
+                          <p className="font-semibold">Email Link Verified!</p>
+                          <p className="text-[11px] opacity-90">Enter your new password below to update and sign in.</p>
+                        </div>
                       </div>
                     ) : (
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                          6-Digit Recovery Code
-                        </label>
-                        <div className="relative">
-                          <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
-                          <Input
-                            type="text"
-                            maxLength={6}
-                            value={forgotOtp}
-                            onChange={(e) => setForgotOtp(e.target.value.replace(/\D/g, ""))}
-                            placeholder="123456"
-                            required
-                            className="pl-10 h-11 rounded-xl text-center text-sm font-mono tracking-widest bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700"
-                          />
+                      <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-center space-y-3">
+                        <div className="mx-auto w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                          <Mail className="h-5 w-5" />
                         </div>
+                        <div>
+                          <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                            Check Your Inbox
+                          </h4>
+                          <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1">
+                            We sent a password reset link to <strong className="text-zinc-900 dark:text-zinc-200">{forgotEmail}</strong>.
+                          </p>
+                          <p className="text-[11px] text-zinc-500 mt-1">
+                            Click the <strong>Reset Password</strong> link in the email to set your new password.
+                          </p>
+                        </div>
+
+                        <div className="pt-2 flex flex-col gap-2">
+                          <Button
+                            type="button"
+                            onClick={handleSendForgotOtp}
+                            disabled={isLoading}
+                            variant="outline"
+                            className="h-9 rounded-xl text-xs w-full"
+                          >
+                            {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Resend Email Link"}
+                          </Button>
+
+                          <button
+                            type="button"
+                            onClick={() => setShowCodeInput(!showCodeInput)}
+                            className="text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 underline"
+                          >
+                            {showCodeInput ? "Hide code input" : "Have a 6-digit recovery code instead?"}
+                          </button>
+                        </div>
+
+                        {showCodeInput && (
+                          <div className="space-y-1.5 text-left pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                            <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                              6-Digit Recovery Code
+                            </label>
+                            <div className="relative">
+                              <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
+                              <Input
+                                type="text"
+                                maxLength={6}
+                                value={forgotOtp}
+                                onChange={(e) => setForgotOtp(e.target.value.replace(/\D/g, ""))}
+                                placeholder="123456"
+                                className="pl-10 h-10 rounded-xl text-center text-sm font-mono tracking-widest bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                        New Password
-                      </label>
-                      <div className="relative">
-                        <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
-                        <Input
-                          type="password"
-                          value={newPassword}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                          placeholder="Minimum 6 characters"
-                          required
-                          className="pl-10 h-11 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700"
-                        />
-                      </div>
-                    </div>
+                    {(hasRecoverySession || showCodeInput) && (
+                      <>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                            New Password
+                          </label>
+                          <div className="relative">
+                            <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
+                            <Input
+                              type="password"
+                              value={newPassword}
+                              onChange={(e) => setNewPassword(e.target.value)}
+                              placeholder="Minimum 6 characters"
+                              required
+                              className="pl-10 h-11 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700"
+                            />
+                          </div>
+                        </div>
 
-                    <Button
-                      type="submit"
-                      disabled={isLoading}
-                      className="w-full h-11 rounded-xl text-xs font-semibold text-white shadow-md active:scale-[0.99] transition"
-                      style={{ backgroundColor: "var(--accent)" }}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <span>Reset Password & Sign In &rarr;</span>
-                      )}
-                    </Button>
+                        <Button
+                          type="submit"
+                          disabled={isLoading}
+                          className="w-full h-11 rounded-xl text-xs font-semibold text-white shadow-md active:scale-[0.99] transition"
+                          style={{ backgroundColor: "var(--accent)" }}
+                        >
+                          {isLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <span>Save New Password &amp; Sign In &rarr;</span>
+                          )}
+                        </Button>
+                      </>
+                    )}
                   </form>
                 )}
+
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginMode("password");
+                      setForgotOtpSent(false);
+                      setError(null);
+                      setInfoMessage(null);
+                      setShowCodeInput(false);
+                    }}
+                    className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+                  >
+                    &larr; Back to standard login
+                  </button>
+                </div>
               </div>
             )}
 
@@ -961,116 +1404,7 @@ function AuthForm() {
                 </div>
               </div>
 
-              {/* 2. Education Level (School vs Junior College vs UG vs PG) */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                  Education Level *
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800/50 rounded-xl text-xs font-medium">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEducationLevel("school");
-                      setStream("General (All Subjects)");
-                      setYearOrClass("Class 10");
-                    }}
-                    className={`py-1.5 px-2 rounded-lg text-center transition ${
-                      educationLevel === "school"
-                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
-                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
-                    }`}
-                  >
-                    1st–10th
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEducationLevel("junior_college");
-                      setStream("Science (PCM - Physics, Chem, Math)");
-                      setYearOrClass("12th Standard");
-                    }}
-                    className={`py-1.5 px-2 rounded-lg text-center transition ${
-                      educationLevel === "junior_college"
-                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
-                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
-                    }`}
-                  >
-                    11th–12th
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEducationLevel("ug");
-                      setStream("Engineering & Tech (B.Tech / B.E)");
-                      setYearOrClass("1st Year");
-                    }}
-                    className={`py-1.5 px-2 rounded-lg text-center transition ${
-                      educationLevel === "ug"
-                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
-                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
-                    }`}
-                  >
-                    UG (Degree)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEducationLevel("pg");
-                      setStream("Technology & Engineering (M.Tech / M.E)");
-                      setYearOrClass("1st Year (Junior)");
-                    }}
-                    className={`py-1.5 px-2 rounded-lg text-center transition ${
-                      educationLevel === "pg"
-                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
-                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
-                    }`}
-                  >
-                    PG (Masters)
-                  </button>
-                </div>
-              </div>
-
-              {/* 3. Stream & Year Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                    Stream / Course *
-                  </label>
-                  <div className="relative">
-                    <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
-                    <select
-                      value={stream}
-                      onChange={(e) => setStream(e.target.value)}
-                      className="w-full pl-9 pr-3 h-10 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] truncate"
-                    >
-                      {streamOptions.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                    Year / Class *
-                  </label>
-                  <select
-                    value={yearOrClass}
-                    onChange={(e) => setYearOrClass(e.target.value)}
-                    className="w-full px-3 h-10 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                  >
-                    {yearOptions.map((yr) => (
-                      <option key={yr} value={yr}>
-                        {yr}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* 4. College / School Combobox (Indian Colleges Database) */}
+              {/* 2. College / School Combobox (Indian Colleges Database) */}
               <div className="space-y-1.5" ref={collegeComboboxRef}>
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
@@ -1153,10 +1487,165 @@ function AuthForm() {
                 )}
               </div>
 
-              {/* 5. Email & Password */}
+              {/* 3. Education Level (School vs Junior College vs UG vs PG) */}
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                  Student Email *
+                  Education Level *
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800/50 rounded-xl text-xs font-medium">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEducationLevel("school");
+                      setYearOrClass("Class 9");
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-center transition ${
+                      educationLevel === "school"
+                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    1st–10th
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEducationLevel("junior_college");
+                      setYearOrClass("FY (11th)");
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-center transition ${
+                      educationLevel === "junior_college"
+                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    11th–12th
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEducationLevel("ug");
+                      setYearOrClass("FY");
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-center transition ${
+                      educationLevel === "ug"
+                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    UG (Degree)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEducationLevel("pg");
+                      setYearOrClass("FY");
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-center transition ${
+                      educationLevel === "pg"
+                        ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    PG (Masters)
+                  </button>
+                </div>
+              </div>
+
+              {/* 4. Stream & Degree Cascade (College Filtered) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                    Degree / Course &amp; Specialization *
+                  </label>
+                  {!collegeCategories.has("all") && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllDegrees(!showAllDegrees)}
+                      className="text-[11px] text-[var(--accent)] hover:underline"
+                    >
+                      {showAllDegrees ? "Filter by college" : "Show all degrees"}
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Select Degree */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] uppercase font-mono text-zinc-500 tracking-wider">
+                      1. Degree / Course
+                    </span>
+                    <div className="relative">
+                      <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
+                      <select
+                        value={selectedDegreeId}
+                        onChange={(e) => setSelectedDegreeId(e.target.value)}
+                        className="w-full pl-9 pr-3 h-10 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] truncate"
+                      >
+                        {availableDegrees.map((deg) => (
+                          <option key={deg.id} value={deg.id}>
+                            {deg.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Select Specialization */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] uppercase font-mono text-zinc-500 tracking-wider">
+                      2. Specialization / Branch
+                    </span>
+                    <select
+                      value={selectedSpecialization}
+                      onChange={(e) => setSelectedSpecialization(e.target.value)}
+                      className="w-full px-3 h-10 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] truncate"
+                    >
+                      {availableSpecializations.map((spec) => (
+                        <option key={spec} value={spec}>
+                          {spec}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Live Preview Badge */}
+                <div className="px-3 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/60 flex items-center justify-between text-[11px]">
+                  <span className="text-zinc-500 font-medium">Selected Program:</span>
+                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 font-mono">
+                    🎓 {combinedCourse}
+                  </span>
+                </div>
+              </div>
+
+              {/* 5. Year / Class (FY, SY, TY, Final Year) */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Year / Class *
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  {yearOptions.map((yr) => (
+                    <button
+                      key={yr}
+                      type="button"
+                      onClick={() => setYearOrClass(yr)}
+                      className={`h-9 px-2 rounded-xl text-xs font-medium text-center transition border ${
+                        yearOrClass === yr
+                          ? "bg-[var(--accent)] text-white border-transparent shadow-xs"
+                          : "bg-zinc-50 dark:bg-zinc-800/50 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      }`}
+                    >
+                      {yr}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 6. Email & Password */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Email *
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
@@ -1164,7 +1653,7 @@ function AuthForm() {
                     type="email"
                     value={regEmail}
                     onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="student@university.edu"
+                    placeholder="name@example.com"
                     required
                     className={`pl-10 h-10 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-800/50 ${
                       errorField === "email"
