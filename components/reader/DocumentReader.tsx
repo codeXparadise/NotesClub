@@ -83,7 +83,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
-  const [scale, setScale] = useState(1.15);
+  const [scale, setScale] = useState(1.0);
 
   // PDF specific state
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -106,8 +106,12 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
   const [isFavorited, setIsFavorited] = useState(false);
   const [isFavLoading, setIsFavLoading] = useState(false);
 
-  // Touch gesture refs
+  // Touch gesture & Pinch-to-zoom refs
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const initialPinchDistRef = useRef<number | null>(null);
+  const initialPinchScaleRef = useRef<number>(1);
+  const lastTapTimeRef = useRef<number>(0);
+  const isPinchingRef = useRef<boolean>(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -331,8 +335,13 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
 
         let computedScale = scale;
         if (containerWidth < 768) {
-          const fitScale = (containerWidth - 24) / baseViewport.width;
-          computedScale = Math.max(fitScale, 0.5) * (scale / 1.15);
+          // Google Drive mobile view: maximize reading area edge-to-edge
+          const fitWidthScale = containerWidth / baseViewport.width;
+          computedScale = fitWidthScale * scale;
+        } else {
+          // Desktop: generous reading page width
+          const fitWidthScale = Math.min((containerWidth - 32) / baseViewport.width, 1.4);
+          computedScale = fitWidthScale * scale;
         }
 
         const viewport = page.getViewport({ scale: computedScale });
@@ -381,6 +390,19 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
     }
   }, [pdfDoc, currentPage, scale, docFormat, renderPdfPage]);
 
+  // Re-render canvas cleanly when security shield drops after intercepted capture
+  useEffect(() => {
+    const handleRestore = () => {
+      if (pdfDoc && docFormat === "pdf") {
+        renderPdfPage(currentPage);
+      }
+    };
+    window.addEventListener("notesclub:security-restore", handleRestore);
+    return () => {
+      window.removeEventListener("notesclub:security-restore", handleRestore);
+    };
+  }, [pdfDoc, docFormat, currentPage, renderPdfPage]);
+
   // Page navigation handlers
   const goToNextPage = useCallback(() => {
     if (currentPage < totalPages) {
@@ -411,38 +433,112 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
     [totalPages, saveProgress]
   );
 
-  // Swipe Gesture Handlers (Mobile & Touchscreen)
+  // Touch Gesture Handlers (Pinch-to-zoom, Double-tap zoom, & Horizontal Swipe)
   const handleTouchStart = (e: React.TouchEvent) => {
+    // 1. Two fingers: Initialize Pinch-to-Zoom
+    if (e.touches.length === 2) {
+      isPinchingRef.current = true;
+      touchStartRef.current = null;
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const dist = Math.hypot(
+        touch1.clientX - touch2.clientX,
+        touch1.clientY - touch2.clientY
+      );
+      initialPinchDistRef.current = dist;
+      initialPinchScaleRef.current = scale;
+      return;
+    }
+
+    // 2. Single finger: Check for Double-tap to zoom or start swipe
     if (e.touches.length === 1) {
+      const now = Date.now();
+      const timeSinceLastTap = now - lastTapTimeRef.current;
+
+      // Double-tap detected (< 320ms between taps)
+      if (timeSinceLastTap > 0 && timeSinceLastTap < 320) {
+        touchStartRef.current = null;
+        lastTapTimeRef.current = 0;
+        setScale((prev) => {
+          const next = prev > 1.2 ? 1.0 : 1.8;
+          setSwipeIndicator(next === 1.0 ? "100% Fit Width" : "180% Zoomed In");
+          setTimeout(() => setSwipeIndicator(null), 1000);
+          return next;
+        });
+        return;
+      }
+
+      lastTapTimeRef.current = now;
       touchStartRef.current = {
         x: e.touches[0].clientX,
         y: e.touches[0].clientY,
-        time: Date.now(),
+        time: now,
       };
     }
   };
 
+  const handleTouchMove = (e: React.TouchEvent) => {
+    // Handle 2-finger pinch zoom
+    if (e.touches.length === 2 && initialPinchDistRef.current) {
+      isPinchingRef.current = true;
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const currentDist = Math.hypot(
+        touch1.clientX - touch2.clientX,
+        touch1.clientY - touch2.clientY
+      );
+      const ratio = currentDist / initialPinchDistRef.current;
+      const rawScale = Math.min(
+        Math.max(0.75, initialPinchScaleRef.current * ratio),
+        3.5
+      );
+      // Step by 0.05 to avoid micro-render thrashing while keeping fluid responsiveness
+      const steppedScale = Math.round(rawScale * 20) / 20;
+      if (Math.abs(steppedScale - scale) >= 0.05) {
+        setScale(steppedScale);
+      }
+      setSwipeIndicator(`${Math.round(steppedScale * 100)}% Zoom`);
+    }
+  };
+
   const handleTouchEnd = (e: React.TouchEvent) => {
+    // End pinch zoom gesture
+    if (e.touches.length < 2 && isPinchingRef.current) {
+      isPinchingRef.current = false;
+      initialPinchDistRef.current = null;
+      setTimeout(() => setSwipeIndicator(null), 800);
+      return;
+    }
+
+    // Handle horizontal page flip swipe (only active when scale <= 1.25 so user can pan while zoomed)
     if (!touchStartRef.current) return;
     const start = touchStartRef.current;
     touchStartRef.current = null;
 
-    const deltaX = e.changedTouches[0].clientX - start.x;
-    const deltaY = e.changedTouches[0].clientY - start.y;
-    const deltaTime = Date.now() - start.time;
+    if (scale > 1.25) return; // Zoomed in: let user scroll/pan freely without flipping pages
 
-    // Must be predominantly horizontal and quick (<500ms)
-    if (deltaTime < 500 && Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.3) {
-      if (deltaX < 0) {
-        // Swipe Left -> Next Page
-        setSwipeIndicator("Next Page →");
-        setTimeout(() => setSwipeIndicator(null), 700);
-        goToNextPage();
-      } else {
-        // Swipe Right -> Previous Page
-        setSwipeIndicator("← Previous Page");
-        setTimeout(() => setSwipeIndicator(null), 700);
-        goToPrevPage();
+    if (e.changedTouches && e.changedTouches.length > 0) {
+      const deltaX = e.changedTouches[0].clientX - start.x;
+      const deltaY = e.changedTouches[0].clientY - start.y;
+      const deltaTime = Date.now() - start.time;
+
+      // Predominantly horizontal swipe and fast (< 500ms)
+      if (
+        deltaTime < 500 &&
+        Math.abs(deltaX) > 45 &&
+        Math.abs(deltaX) > Math.abs(deltaY) * 1.3
+      ) {
+        if (deltaX < 0) {
+          // Swipe Left -> Next Page
+          setSwipeIndicator("Next Page →");
+          setTimeout(() => setSwipeIndicator(null), 700);
+          goToNextPage();
+        } else {
+          // Swipe Right -> Previous Page
+          setSwipeIndicator("← Previous Page");
+          setTimeout(() => setSwipeIndicator(null), 700);
+          goToPrevPage();
+        }
       }
     }
   };
@@ -504,6 +600,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
       <div
         ref={containerRef}
         onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         className="relative flex flex-col h-screen w-screen bg-[#09090b] text-zinc-100 select-none overflow-hidden font-sans"
       >
@@ -655,22 +752,25 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
           </div>
         </header>
 
-        {/* 2. Main Reading Viewport */}
+        {/* 2. Main Reading Viewport - Edge-to-Edge on Mobile like Google Drive */}
         <main
-          className="relative flex-1 overflow-auto bg-[#09090b] flex items-center justify-center p-2 sm:p-6"
+          className="relative flex-1 overflow-auto bg-[#09090b] flex items-start sm:items-center justify-center p-0 sm:p-6"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
           onClick={() => {
             if (isDrawerOpen) setIsDrawerOpen(false);
           }}
         >
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center space-y-3 text-center">
+            <div className="flex flex-col items-center justify-center space-y-3 text-center my-auto">
               <Loader2 className="h-7 w-7 animate-spin text-[var(--accent)]" />
               <p className="text-xs font-medium text-zinc-400 tracking-wide">
                 Loading study document...
               </p>
             </div>
           ) : errorMessage ? (
-            <div className="flex flex-col items-center justify-center max-w-sm p-6 text-center rounded-2xl border border-zinc-800 bg-zinc-900/60 shadow-xl">
+            <div className="flex flex-col items-center justify-center max-w-sm p-6 text-center rounded-2xl border border-zinc-800 bg-zinc-900/60 shadow-xl my-auto">
               <ShieldAlert className="h-8 w-8 text-rose-500 mb-2" />
               <h3 className="text-sm font-semibold text-zinc-200">Unable to Open Note</h3>
               <p className="mt-1 text-xs text-zinc-400">{errorMessage}</p>
@@ -683,12 +783,13 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
             </div>
           ) : docFormat === "pdf" ? (
             /* PDF Canvas Viewport with Gesture Support & Tone Filter */
-            <div className="relative shadow-2xl transition-all duration-150">
+            <div className="relative shadow-2xl transition-all duration-150 mx-auto my-0 sm:my-4 flex items-center justify-center w-full sm:w-auto">
               <canvas
                 ref={canvasRef}
-                className={`block rounded-sm transition-all duration-150 ${toneFilterClass}`}
+                className={`block transition-all duration-150 ${toneFilterClass}`}
                 style={{
                   boxShadow: "0 10px 40px rgba(0, 0, 0, 0.7)",
+                  maxWidth: "none",
                 }}
               />
               {showWatermark && (

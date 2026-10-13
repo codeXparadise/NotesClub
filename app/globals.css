@@ -219,3 +219,25 @@ body {
   -webkit-user-select: none !important;
 }
 
+/* ========================================================
+   ZERO-LATENCY HARDWARE SCREENSHOT BLACKOUT RULES
+   ======================================================== */
+html.secure-screen-blackout canvas,
+html.secure-screen-blackout .reader-content-layer,
+html.secure-screen-blackout .docx-rendered-content,
+html.secure-screen-blackout .excel-rendered-content,
+body.secure-screen-blackout canvas {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  filter: blur(100px) brightness(0) !important;
+  transform: scale(0.01) !important;
+}
+
+html.secure-screen-blackout #security-blackout-curtain {
+  display: flex !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  z-index: 999999 !important;
+}
+
