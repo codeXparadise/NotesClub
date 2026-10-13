@@ -34,8 +34,8 @@ async function seed() {
 
   // 2. Create Admin Teacher User
   console.log('2. Creating Dummy Admin (Teacher)...');
-  const adminEmail = 'admin@notesclub.edu';
-  const adminPassword = 'AdminPass123';
+  const adminEmail = 'admin@notesclub.com';
+  const adminPassword = '1Ab23cd4@';
 
   // Check if admin already exists
   const { data: existingAdminList } = await supabase.auth.admin.listUsers();
