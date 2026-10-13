@@ -47,6 +47,33 @@ export default function AdminAnalyticsPage() {
     loadAnalytics();
   }, []);
 
+  if (isLoading) {
+    return (
+      <div className="space-y-8 animate-in fade-in duration-300">
+        <div className="space-y-2">
+          <div className="h-7 w-80 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
+          <div className="h-4 w-96 bg-slate-100 dark:bg-slate-800/60 rounded-lg animate-pulse" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-32 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 animate-pulse space-y-3"
+            >
+              <div className="h-3.5 w-28 bg-slate-200 dark:bg-slate-800 rounded" />
+              <div className="h-7 w-20 bg-slate-200 dark:bg-slate-800 rounded" />
+              <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="h-80 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 animate-pulse" />
+          <div className="h-80 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       {/* Header */}

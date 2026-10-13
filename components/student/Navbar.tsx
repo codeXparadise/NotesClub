@@ -90,7 +90,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </Link>
 
-          {/* User profile / Logout */}
+          {/* User profile */}
+          <Link
+            href="/profile"
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200/80 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-800 transition"
+            title="My Profile & Security"
+          >
+            <User className="h-4 w-4" />
+          </Link>
+
+          {/* Logout */}
           <button
             onClick={handleSignOut}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200/80 bg-slate-50 text-slate-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 dark:border-slate-800 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 transition"

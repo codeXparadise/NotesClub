@@ -81,11 +81,20 @@ export async function GET(
       .order("created_at", { ascending: false })
       .limit(50);
 
+    // 5. Fetch Activity Logs (Profile updates, password changes, etc.)
+    const { data: activities } = await supabaseAdmin
+      .from("user_activities")
+      .select("id, activity_type, description, details, created_at")
+      .eq("user_id", id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
     return NextResponse.json({
       student,
       readingHistory: readingHistory || [],
       wishlist: wishlist || [],
       searches: searches || [],
+      activities: activities || [],
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

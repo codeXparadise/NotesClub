@@ -22,6 +22,8 @@ import {
   ChevronRight,
   ExternalLink,
   RefreshCw,
+  KeyRound,
+  Edit3,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
@@ -49,6 +51,7 @@ interface UserDossier {
   readingHistory: any[];
   wishlist: any[];
   searches: any[];
+  activities?: any[];
 }
 
 export default function AdminUsersPage() {
@@ -67,7 +70,7 @@ export default function AdminUsersPage() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [dossier, setDossier] = useState<UserDossier | null>(null);
   const [isDossierLoading, setIsDossierLoading] = useState(false);
-  const [dossierTab, setDossierTab] = useState<"info" | "reading" | "wishlist" | "searches">("info");
+  const [dossierTab, setDossierTab] = useState<"info" | "reading" | "wishlist" | "searches" | "activities">("info");
 
   const fetchUsers = async () => {
     try {
@@ -367,12 +370,42 @@ export default function AdminUsersPage() {
             {/* Table Body */}
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-normal">
               {isLoading ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
-                    <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-indigo-500" />
-                    Loading students dataset...
-                  </td>
-                </tr>
+                <>
+                  {[1, 2, 3, 4, 5].map((s) => (
+                    <tr key={s} className="animate-pulse">
+                      <td className="py-3 px-4 text-center">
+                        <div className="h-4 w-4 mx-auto bg-slate-200 dark:bg-slate-800 rounded" />
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center space-x-3">
+                          <div className="h-8 w-8 rounded-full bg-slate-200 dark:bg-slate-800 shrink-0" />
+                          <div className="space-y-1.5 min-w-0">
+                            <div className="h-3.5 w-28 bg-slate-200 dark:bg-slate-800 rounded" />
+                            <div className="h-2.5 w-36 bg-slate-100 dark:bg-slate-800/60 rounded" />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="h-3.5 w-20 bg-slate-200 dark:bg-slate-800 rounded font-mono" />
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="h-3.5 w-32 bg-slate-200 dark:bg-slate-800 rounded" />
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="h-3.5 w-24 bg-slate-200 dark:bg-slate-800 rounded" />
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="h-3.5 w-20 bg-slate-200 dark:bg-slate-800 rounded" />
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="h-5 w-16 bg-slate-200 dark:bg-slate-800 rounded-full" />
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="h-6 w-12 ml-auto bg-slate-200 dark:bg-slate-800 rounded-lg" />
+                      </td>
+                    </tr>
+                  ))}
+                </>
               ) : students.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-slate-400">
@@ -484,12 +517,12 @@ export default function AdminUsersPage() {
         </div>
       </div>
 
-      {/* Student Dossier Drawer (Slides in on row click) */}
+      {/* Student Dossier Full-Screen Overlay */}
       {selectedStudentId && (
-        <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/50 backdrop-blur-sm flex justify-end">
-          <div className="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 animate-in slide-in-from-right duration-300">
+        <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-0 sm:p-2 md:p-4 animate-in fade-in duration-200">
+          <div className="w-full h-full bg-white dark:bg-slate-900 sm:rounded-3xl shadow-2xl flex flex-col border border-slate-200/80 dark:border-slate-800 overflow-hidden">
             {/* Dossier Header */}
-            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between bg-slate-50 dark:bg-slate-900/60">
+            <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/60">
               <div className="flex items-center space-x-4">
                 <div className="h-12 w-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-lg shadow-md shadow-indigo-600/25">
                   {(dossier?.student.full_name || "S").charAt(0).toUpperCase()}
@@ -500,12 +533,12 @@ export default function AdminUsersPage() {
                       {dossier?.student.full_name || "Student Profile"}
                     </h2>
                     {dossier?.student.is_blocked ? (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400">
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400 border border-rose-200">
                         Blocked
                       </span>
                     ) : (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
-                        Active
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 border border-emerald-200">
+                        Active Student
                       </span>
                     )}
                   </div>
@@ -521,18 +554,20 @@ export default function AdminUsersPage() {
                     setSelectedStudentId(null);
                     setDossier(null);
                   }}
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 font-semibold text-xs transition"
+                  title="Close Fullscreen View"
                 >
                   <X className="h-5 w-5" />
+                  <span className="hidden sm:inline">Close</span>
                 </button>
               </div>
             </div>
 
             {/* Dossier Navigation Tabs */}
-            <div className="flex border-b border-slate-200 dark:border-slate-800 px-6 gap-2 bg-white dark:bg-slate-900">
+            <div className="flex border-b border-slate-200 dark:border-slate-800 px-6 gap-2 bg-white dark:bg-slate-900 overflow-x-auto">
               <button
                 onClick={() => setDossierTab("info")}
-                className={`py-3 px-3 text-xs font-semibold border-b-2 transition ${
+                className={`py-3 px-3 text-xs font-semibold border-b-2 whitespace-nowrap transition ${
                   dossierTab === "info"
                     ? "border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
                     : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -542,7 +577,7 @@ export default function AdminUsersPage() {
               </button>
               <button
                 onClick={() => setDossierTab("reading")}
-                className={`py-3 px-3 text-xs font-semibold border-b-2 transition ${
+                className={`py-3 px-3 text-xs font-semibold border-b-2 whitespace-nowrap transition ${
                   dossierTab === "reading"
                     ? "border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
                     : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -552,7 +587,7 @@ export default function AdminUsersPage() {
               </button>
               <button
                 onClick={() => setDossierTab("wishlist")}
-                className={`py-3 px-3 text-xs font-semibold border-b-2 transition ${
+                className={`py-3 px-3 text-xs font-semibold border-b-2 whitespace-nowrap transition ${
                   dossierTab === "wishlist"
                     ? "border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
                     : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -562,13 +597,23 @@ export default function AdminUsersPage() {
               </button>
               <button
                 onClick={() => setDossierTab("searches")}
-                className={`py-3 px-3 text-xs font-semibold border-b-2 transition ${
+                className={`py-3 px-3 text-xs font-semibold border-b-2 whitespace-nowrap transition ${
                   dossierTab === "searches"
                     ? "border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
                     : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400"
                 }`}
               >
                 Search Queries ({dossier?.searches.length || 0})
+              </button>
+              <button
+                onClick={() => setDossierTab("activities")}
+                className={`py-3 px-3 text-xs font-semibold border-b-2 whitespace-nowrap transition ${
+                  dossierTab === "activities"
+                    ? "border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
+                    : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400"
+                }`}
+              >
+                Account Activities ({dossier?.activities?.length || 0})
               </button>
             </div>
 
@@ -800,6 +845,40 @@ export default function AdminUsersPage() {
                             <span className="text-[10px] text-slate-400 whitespace-nowrap pl-2">
                               {formatDate(s.created_at)}
                             </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 5: ACCOUNT & PROFILE ACTIVITIES */}
+                  {dossierTab === "activities" && (
+                    <div className="space-y-3">
+                      {(!dossier.activities || dossier.activities.length === 0) ? (
+                        <div className="py-12 text-center text-xs text-slate-400">
+                          No profile updates or password changes recorded for this student yet.
+                        </div>
+                      ) : (
+                        dossier.activities.map((act: any, i: number) => (
+                          <div
+                            key={i}
+                            className="flex items-start space-x-3.5 p-3.5 rounded-2xl border border-slate-100 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-800/40 text-xs"
+                          >
+                            <div className="h-8 w-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 mt-0.5">
+                              {act.activity_type.includes("password") ? (
+                                <KeyRound className="h-4 w-4" />
+                              ) : (
+                                <Edit3 className="h-4 w-4" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-slate-900 dark:text-white">
+                                {act.description}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                                {formatDate(act.created_at)}
+                              </div>
+                            </div>
                           </div>
                         ))
                       )}

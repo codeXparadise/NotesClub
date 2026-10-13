@@ -126,6 +126,68 @@ export default function AdminDashboardPage() {
 
   // Line chart calculation
   const trend = data?.readingTrend || [];
+  // Loading state (prevents flashing zeros or unpopulated counters)
+  if (loading) {
+    return (
+      <div className="space-y-8 animate-in fade-in duration-300">
+        {/* Header Skeleton */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="space-y-2">
+            <div className="h-7 w-72 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
+            <div className="h-4 w-96 bg-slate-100 dark:bg-slate-800/60 rounded-lg animate-pulse" />
+          </div>
+          <div className="flex items-center space-x-2">
+            <div className="h-9 w-32 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
+            <div className="h-9 w-36 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
+          </div>
+        </div>
+
+        {/* Loading Banner */}
+        <div className="rounded-3xl border border-indigo-100 dark:border-indigo-900/40 bg-gradient-to-r from-indigo-50/50 via-white to-indigo-50/30 dark:from-indigo-950/20 dark:via-slate-900 dark:to-indigo-950/10 p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center space-x-3.5">
+            <div className="h-10 w-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md animate-pulse">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                Gathering Real-Time Instructor Analytics...
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Aggregating student cohorts, reader metrics, and catalog statistics
+              </p>
+            </div>
+          </div>
+          <div className="w-full sm:w-48 bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+            <div className="h-full bg-indigo-600 rounded-full animate-indeterminate w-2/3" />
+          </div>
+        </div>
+
+        {/* Stat Cards Skeletons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <div className="h-4 w-24 bg-slate-200 dark:bg-slate-800 rounded-lg animate-pulse" />
+                <div className="h-9 w-9 rounded-2xl bg-slate-100 dark:bg-slate-800 animate-pulse" />
+              </div>
+              <div className="h-8 w-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
+              <div className="h-3 w-32 bg-slate-100 dark:bg-slate-800/60 rounded-md animate-pulse" />
+            </div>
+          ))}
+        </div>
+
+        {/* Charts Grid Skeleton */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 rounded-3xl border border-slate-200/80 bg-white p-6 dark:border-slate-800 dark:bg-slate-900 h-80 animate-pulse" />
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 dark:border-slate-800 dark:bg-slate-900 h-80 animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
   const maxTrend = Math.max(...trend.map((t) => t.count), 5);
 
   return (

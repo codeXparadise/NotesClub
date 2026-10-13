@@ -502,6 +502,42 @@ export default function StudentHomePage() {
 
   const greetingWord = getTimeOfDayGreeting();
 
+  // Loading animation state (prevents zero counts or empty flashes)
+  if (isLoading && allDocuments.length === 0) {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-6 transition-colors duration-300"
+        style={{ backgroundColor: "var(--bg)", color: "var(--ink)" }}
+      >
+        <div className="flex flex-col items-center space-y-6 max-w-sm w-full text-center animate-in fade-in duration-300">
+          <div
+            className="h-16 w-16 rounded-[22px] flex items-center justify-center text-white shadow-xl animate-pulse"
+            style={{ backgroundColor: "var(--accent)" }}
+          >
+            <span className="font-serif text-3xl font-bold">N</span>
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="font-serif text-xl sm:text-2xl font-bold tracking-tight text-[var(--ink)]">
+              Opening Notes Club Vault...
+            </h2>
+            <p className="text-xs text-[var(--muted)]">
+              Loading verified course collections, study notes & reading progress
+            </p>
+          </div>
+          <div
+            className="w-full bg-[var(--surface-2)] h-2 rounded-full overflow-hidden border"
+            style={{ borderColor: "var(--line)" }}
+          >
+            <div
+              className="h-full rounded-full animate-indeterminate"
+              style={{ backgroundColor: "var(--accent)", width: "50%" }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="min-h-screen font-sans text-[var(--ink)] antialiased transition-colors duration-300"
@@ -685,11 +721,11 @@ export default function StudentHomePage() {
 
             {/* Profile / Account */}
             <Link
-              href="/home"
+              href="/profile"
               className={`flex items-center rounded-2xl text-[var(--ink-2)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)] transition ${
                 isRailExpanded ? "px-3.5 py-3 space-x-3.5" : "justify-center h-12 w-12 mx-auto"
               }`}
-              title="Profile"
+              title="My Profile & Security"
             >
               <User className="h-5 w-5 shrink-0 text-[var(--muted)]" />
               {isRailExpanded && (
@@ -790,6 +826,15 @@ export default function StudentHomePage() {
             )}
           </div>
           <span className="text-[10px] mt-0.5">Alerts</span>
+        </Link>
+
+        <Link
+          href="/profile"
+          className="flex flex-col items-center justify-center p-2 text-[var(--muted)] hover:text-[var(--ink)] text-xs font-medium"
+          title="My Profile"
+        >
+          <User className="h-5 w-5" />
+          <span className="text-[10px] mt-0.5">Profile</span>
         </Link>
 
         <button
