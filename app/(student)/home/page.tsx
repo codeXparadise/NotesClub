@@ -22,6 +22,7 @@ import {
   LogOut,
   FolderOpen,
   Heart,
+  FileText,
 } from "lucide-react";
 
 // =========================================================================
@@ -169,6 +170,9 @@ export default function StudentHomePage() {
   // Search State
   const [rawQuery, setRawQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<DocumentItem[]>([]);
+  const [isSearchingServer, setIsSearchingServer] = useState(false);
+  const [searchCategoryFilter, setSearchCategoryFilter] = useState("all");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const favScrollRef = useRef<HTMLDivElement>(null);
@@ -220,6 +224,36 @@ export default function StudentHomePage() {
     }, 200);
     return () => clearTimeout(timer);
   }, [rawQuery]);
+
+  // Live server query across all drive files when search query changes
+  useEffect(() => {
+    if (!debouncedQuery) {
+      setSearchResults([]);
+      setIsSearchingServer(false);
+      return;
+    }
+
+    let isCurrent = true;
+    setIsSearchingServer(true);
+    setSearchCategoryFilter("all");
+
+    fetch(`/api/documents?q=${encodeURIComponent(debouncedQuery)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!isCurrent) return;
+        if (Array.isArray(data.documents)) {
+          setSearchResults(data.documents);
+        }
+      })
+      .catch((err) => console.error("Search API error:", err))
+      .finally(() => {
+        if (isCurrent) setIsSearchingServer(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [debouncedQuery]);
 
   // Load User, Documents, Categories & Reading History
   useEffect(() => {
@@ -365,6 +399,48 @@ export default function StudentHomePage() {
     });
   }, [categories, allDocuments, debouncedQuery]);
 
+  // Filtered matching books entirely from the drive across every category
+  const allMatchingFiles = useMemo(() => {
+    if (!debouncedQuery) return [];
+    const q = debouncedQuery.toLowerCase().trim();
+    const tokens = q.split(/\s+/).filter(Boolean);
+
+    // 1. In-memory matches across allDocuments
+    const localMatches = allDocuments.filter((doc) => {
+      const title = (doc.title || "").toLowerCase();
+      const desc = (doc.description || "").toLowerCase();
+      const cat = (doc.categories?.name || "").toLowerCase();
+      const fullText = `${title} ${desc} ${cat}`;
+      return fullText.includes(q) || (tokens.length > 1 && tokens.every((t) => fullText.includes(t)));
+    });
+
+    // 2. Merge with searchResults from server, deduplicated by id
+    const map = new Map<string, DocumentItem>();
+    localMatches.forEach((d) => map.set(d.id, d));
+    searchResults.forEach((d) => map.set(d.id, d));
+
+    return Array.from(map.values());
+  }, [allDocuments, searchResults, debouncedQuery]);
+
+  // Categories that have matching files
+  const matchingCategoriesList = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allMatchingFiles.forEach((d) => {
+      const cat = d.categories?.name?.split(" / ")[0]?.trim() || "Other";
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, count]) => ({ name, count }));
+  }, [allMatchingFiles]);
+
+  // Displayed files filtered by optional sub-pill
+  const displayedFiles = useMemo(() => {
+    if (searchCategoryFilter === "all") return allMatchingFiles;
+    return allMatchingFiles.filter((d) => {
+      const cat = d.categories?.name || "";
+      return cat.startsWith(searchCategoryFilter);
+    });
+  }, [allMatchingFiles, searchCategoryFilter]);
+
   // Filtered Favorites (Instant live-filter by search query)
   const filteredFavorites = useMemo(() => {
     if (!debouncedQuery) return favoriteDocs;
@@ -376,10 +452,9 @@ export default function StudentHomePage() {
   }, [favoriteDocs, debouncedQuery]);
 
   const hasNoResults =
-    debouncedQuery &&
-    filteredHistory.length === 0 &&
-    filteredCategories.length === 0 &&
-    filteredFavorites.length === 0;
+    Boolean(debouncedQuery) &&
+    allMatchingFiles.length === 0 &&
+    !isSearchingServer;
 
   // Toggle Favorite
   const toggleFavorite = async (doc: DocumentItem, e?: React.MouseEvent) => {
@@ -821,41 +896,190 @@ export default function StudentHomePage() {
           </section>
 
           {/* =======================================================================
-              EMPTY SEARCH RESULTS STATE (Functional live filtering)
+              SEARCH MODE VS NORMAL DASHBOARD MODE
              ======================================================================= */}
-          {hasNoResults && (
-            <div
-              className="rounded-[var(--radius-card)] border p-12 text-center my-8"
-              style={{
-                backgroundColor: "var(--surface)",
-                borderColor: "var(--line)",
-                boxShadow: "var(--shadow)",
-              }}
-            >
-              <h3 className="font-serif text-xl font-medium text-[var(--ink)]">
-                No matches found
-              </h3>
-              <p className="mt-1.5 text-xs sm:text-sm text-[var(--muted)] max-w-sm mx-auto">
-                Try a different category or book name. You can search by subject, topic or chapter.
-              </p>
-              <button
-                onClick={() => {
-                  setRawQuery("");
-                  setDebouncedQuery("");
-                }}
-                className="mt-4 px-4 py-2 rounded-full text-xs font-semibold text-white transition active:scale-95"
-                style={{ backgroundColor: "var(--accent)" }}
+          {debouncedQuery ? (
+            /* SEARCH MODE: LIST DOWN ALL MATCHING FILES RATHER THAN CATEGORIES */
+            <div className="space-y-6">
+              {/* Search Header */}
+              <div
+                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b"
+                style={{ borderColor: "var(--line)" }}
               >
-                Clear Search Filter
-              </button>
-            </div>
-          )}
+                <div>
+                  <div className="flex items-center space-x-2.5">
+                    <h2 className="font-serif text-xl sm:text-2xl font-semibold text-[var(--ink)] tracking-tight">
+                      Matching Books & Files
+                    </h2>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-[var(--accent-soft)] text-[var(--accent)] font-mono">
+                      {allMatchingFiles.length} {allMatchingFiles.length === 1 ? "file" : "files"}
+                    </span>
+                    {isSearchingServer && (
+                      <span className="text-[11px] text-[var(--muted)] animate-pulse">Searching entire vault...</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[var(--muted)] mt-1">
+                    Found {allMatchingFiles.length} files matching &ldquo;<span className="font-semibold text-[var(--ink)]">{rawQuery}</span>&rdquo; across all Drive folders & categories
+                  </p>
+                </div>
 
-          {/* =======================================================================
-              ZONE 2: READING HISTORY (Horizontal scroll / swipeable row)
-             ======================================================================= */}
-          {!hasNoResults && filteredHistory.length > 0 && (
-            <section id="history" className="space-y-4">
+                <button
+                  onClick={() => {
+                    setRawQuery("");
+                    setDebouncedQuery("");
+                  }}
+                  className="text-xs font-semibold px-3.5 py-2 rounded-xl border bg-[var(--surface)] text-[var(--ink)] hover:bg-[var(--surface-2)] transition self-start sm:self-auto"
+                  style={{ borderColor: "var(--line)" }}
+                >
+                  Clear Search & Return &times;
+                </button>
+              </div>
+
+              {/* Filter Pills across categories */}
+              {matchingCategoriesList.length > 1 && (
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                  <span className="text-xs font-medium text-[var(--muted)] shrink-0 mr-1">Filter collection:</span>
+                  <button
+                    onClick={() => setSearchCategoryFilter("all")}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold shrink-0 transition ${
+                      searchCategoryFilter === "all"
+                        ? "text-white shadow-sm"
+                        : "border text-[var(--ink-2)] hover:bg-[var(--surface-2)]"
+                    }`}
+                    style={{
+                      backgroundColor: searchCategoryFilter === "all" ? "var(--accent)" : "var(--surface)",
+                      borderColor: searchCategoryFilter === "all" ? "var(--accent)" : "var(--line)",
+                    }}
+                  >
+                    All Collections ({allMatchingFiles.length})
+                  </button>
+                  {matchingCategoriesList.map((cat) => (
+                    <button
+                      key={cat.name}
+                      onClick={() => setSearchCategoryFilter(cat.name)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold shrink-0 transition ${
+                        searchCategoryFilter === cat.name
+                          ? "text-white shadow-sm"
+                          : "border text-[var(--ink-2)] hover:bg-[var(--surface-2)]"
+                      }`}
+                      style={{
+                        backgroundColor: searchCategoryFilter === cat.name ? "var(--accent)" : "var(--surface)",
+                        borderColor: searchCategoryFilter === cat.name ? "var(--accent)" : "var(--line)",
+                      }}
+                    >
+                      {cat.name} ({cat.count})
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Empty State */}
+              {hasNoResults ? (
+                <div
+                  className="rounded-[var(--radius-card)] border p-12 text-center my-6"
+                  style={{
+                    backgroundColor: "var(--surface)",
+                    borderColor: "var(--line)",
+                    boxShadow: "var(--shadow)",
+                  }}
+                >
+                  <FileText className="h-10 w-10 mx-auto text-[var(--muted)] opacity-40 mb-3" />
+                  <h3 className="font-serif text-xl font-medium text-[var(--ink)]">
+                    No files match &ldquo;{rawQuery}&rdquo;
+                  </h3>
+                  <p className="mt-1.5 text-xs sm:text-sm text-[var(--muted)] max-w-sm mx-auto">
+                    Try searching for a different keyword, subject, or chapter name across all categories.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setRawQuery("");
+                      setDebouncedQuery("");
+                    }}
+                    className="mt-4 px-4 py-2 rounded-full text-xs font-semibold text-white transition active:scale-95"
+                    style={{ backgroundColor: "var(--accent)" }}
+                  >
+                    Clear Search Filter
+                  </button>
+                </div>
+              ) : (
+                /* Direct Files / Books Grid */
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {displayedFiles.map((doc) => {
+                    const catName = doc.categories?.name || "Study Notes";
+                    const [gradStart, gradEnd] = getCategoryGradient(catName);
+                    const isFav = favoriteIds.has(doc.id);
+                    const pageCount = doc.page_count;
+
+                    return (
+                      <Link
+                        key={doc.id}
+                        href={`/read/${encodeURIComponent(slugify(doc.title))}`}
+                        className="group flex flex-col justify-between rounded-[18px] border p-4 sm:p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-md select-none"
+                        style={{
+                          backgroundColor: "var(--surface)",
+                          borderColor: "var(--line)",
+                          boxShadow: "var(--shadow)",
+                        }}
+                      >
+                        <div>
+                          {/* Top Badges */}
+                          <div className="flex items-center justify-between gap-2 mb-2.5">
+                            <span
+                              className="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase font-mono text-white truncate max-w-[170px]"
+                              style={{
+                                background: `linear-gradient(135deg, ${gradStart}, ${gradEnd})`,
+                              }}
+                              title={catName}
+                            >
+                              {catName.split(" / ")[0]}
+                            </span>
+
+                            <button
+                              onClick={(e) => toggleFavorite(doc, e)}
+                              className="p-1 rounded-full text-zinc-400 hover:text-rose-500 hover:scale-110 active:scale-95 transition"
+                              title={isFav ? "Remove from wishlist" : "Add to wishlist"}
+                            >
+                              <Heart
+                                className={`h-4 w-4 ${
+                                  isFav ? "fill-rose-500 text-rose-500" : "text-zinc-400"
+                                }`}
+                              />
+                            </button>
+                          </div>
+
+                          {/* Full Unshortened File Title */}
+                          <h3
+                            className="font-semibold text-sm sm:text-[14px] text-[var(--ink)] leading-snug group-hover:text-[var(--accent)] transition line-clamp-2"
+                            title={doc.title}
+                          >
+                            {doc.title}
+                          </h3>
+
+                          {/* Subcategory location */}
+                          <p className="text-[11px] text-[var(--muted)] line-clamp-1 mt-1 font-mono">
+                            {catName}
+                          </p>
+                        </div>
+
+                        {/* Bottom Footer */}
+                        <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--line)] text-[11px] text-[var(--muted)]">
+                          <span>{pageCount ? `${pageCount} pages` : "Document"}</span>
+                          <span className="font-semibold text-[var(--accent)] group-hover:translate-x-0.5 transition inline-flex items-center gap-0.5">
+                            Read file &rarr;
+                          </span>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* NORMAL DASHBOARD: READING HISTORY, WISHLIST & CATEGORIES */
+            <>
+              {/* ZONE 2: READING HISTORY (Horizontal scroll / swipeable row) */}
+              {filteredHistory.length > 0 && (
+                <section id="history" className="space-y-4">
               {/* Section Header Row */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
@@ -1042,8 +1266,7 @@ export default function StudentHomePage() {
           {/* =======================================================================
               ZONE 2.5: FAVORITES / WISHLIST (Directly below Reading History)
              ======================================================================= */}
-          {!hasNoResults && (
-            <section id="favorites" className="space-y-4">
+          <section id="favorites" className="space-y-4">
               {/* Section Header Row */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2.5">
@@ -1185,13 +1408,11 @@ export default function StudentHomePage() {
                 </div>
               )}
             </section>
-          )}
 
           {/* =======================================================================
               ZONE 3: CATEGORIES GRID (4 cols desktop, 3 cols <=1100px, 2 cols <=760px)
              ======================================================================= */}
-          {!hasNoResults && (
-            <section id="categories" className="space-y-4">
+          <section id="categories" className="space-y-4">
               {/* Section Header Row */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
@@ -1300,23 +1521,8 @@ export default function StudentHomePage() {
                 )}
               </div>
             </section>
-          )}
-
-          {/* Quick Filter Active Bar (If a category or search is clicked) */}
-          {debouncedQuery && (
-            <div className="flex items-center justify-between text-xs text-[var(--muted)] pt-2 border-t" style={{ borderColor: "var(--line)" }}>
-              <span>Filtering library for: &quot;{debouncedQuery}&quot;</span>
-              <button
-                onClick={() => {
-                  setRawQuery("");
-                  setDebouncedQuery("");
-                }}
-                className="underline hover:text-[var(--ink)]"
-              >
-                Reset filter
-              </button>
-            </div>
-          )}
+          </>
+        )}
         </main>
       </div>
     </div>

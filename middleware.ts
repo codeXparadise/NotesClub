@@ -35,12 +35,11 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Protected paths
+  // Protected paths for students
   const isProtectedPath =
     pathname.startsWith("/home") ||
     pathname.startsWith("/read") ||
-    pathname.startsWith("/notifications") ||
-    pathname.startsWith("/admin");
+    pathname.startsWith("/notifications");
 
   if (isProtectedPath && !user) {
     const redirectUrl = request.nextUrl.clone();

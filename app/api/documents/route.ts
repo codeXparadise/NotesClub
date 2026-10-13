@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     const categoryId = searchParams.get("category")?.trim() || "";
 
     // 1. Check Redis cache first (ultra-fast sub-10ms response)
-    const cacheKey = `notes_club:docs:${profile?.role || "student"}:${profile?.course_id || "all"}:${categoryId || "all"}:${q || "none"}`;
+    const cacheKey = `notes_club:docs:${profile?.role || "student"}:${categoryId || "all"}:${q || "none"}`;
     const cached = await cacheGet<{ documents: any[] }>(cacheKey);
     if (cached) {
       return NextResponse.json(cached, {
@@ -40,24 +40,22 @@ export async function GET(request: NextRequest) {
     }
 
     // 2. Cache MISS: query database
+    // Entire Drive Search: When student searches, search across ALL categories and documents from drive
     let query = admin
       .from("documents")
       .select(
         "id, title, description, category_id, course_id, mime_type, size_bytes, page_count, cover_url, is_published, is_featured, updated_at, categories(id, name)"
       )
       .eq("is_published", true)
-      .order("updated_at", { ascending: false });
-
-    // Students see documents belonging to their enrolled course or open documents
-    if (profile?.role === "student" && profile.course_id) {
-      query = query.or(`course_id.eq.${profile.course_id},course_id.is.null`);
-    }
+      .order("updated_at", { ascending: false })
+      .limit(1000);
 
     if (categoryId && categoryId !== "all") {
       query = query.eq("category_id", categoryId);
     }
 
     if (q) {
+      // Search entirely from each category and book title/description
       query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%`);
     }
 
@@ -70,12 +68,12 @@ export async function GET(request: NextRequest) {
 
     const result = { documents: documents || [] };
 
-    // 3. Store in Redis cache with 10 minute expiration
-    await cacheSet(cacheKey, result, 600);
+    // 3. Store in Redis cache with 5 minute expiration
+    await cacheSet(cacheKey, result, 300);
 
     // If search query, fire-and-forget log
     if (q) {
-      supabase
+      admin
         .from("search_logs")
         .insert({
           student_id: user.id,

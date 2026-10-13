@@ -4,11 +4,22 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { fullName, rollNumber, courseId, email, password } = body;
+    const {
+      fullName,
+      rollNumber,
+      courseId,
+      email,
+      password,
+      collegeName,
+      educationLevel,
+      stream,
+      courseName,
+      yearOrClass,
+    } = body;
 
     if (!fullName?.trim() || !rollNumber?.trim() || !email?.trim() || !password) {
       return NextResponse.json(
-        { error: "All fields are required." },
+        { error: "Full Name, Roll Number, Email, and Password are required." },
         { status: 400 }
       );
     }
@@ -23,6 +34,11 @@ export async function POST(request: NextRequest) {
     const cleanEmail = email.trim().toLowerCase();
     const cleanRoll = rollNumber.trim().toUpperCase();
     const cleanName = fullName.trim();
+    const cleanCollege = (collegeName || "").trim();
+    const cleanLevel = (educationLevel || "").trim();
+    const cleanStream = (stream || "").trim();
+    const cleanCourseName = (courseName || "").trim();
+    const cleanYear = (yearOrClass || "").trim();
 
     const supabaseAdmin = createAdminClient();
 
@@ -63,16 +79,23 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. Create user in auth.users with auto-confirmation so student can log in instantly
+    const metadata = {
+      full_name: cleanName,
+      roll_number: cleanRoll,
+      course_id: courseId || null,
+      college_name: cleanCollege,
+      education_level: cleanLevel,
+      stream: cleanStream,
+      course_name: cleanCourseName,
+      year_or_class: cleanYear,
+      role: "student",
+    };
+
     const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: cleanEmail,
       password,
       email_confirm: true,
-      user_metadata: {
-        full_name: cleanName,
-        roll_number: cleanRoll,
-        course_id: courseId || null,
-        role: "student",
-      },
+      user_metadata: metadata,
     });
 
     if (authError) {
@@ -100,22 +123,43 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. Upsert user into profiles
-    const { error: profileError } = await supabaseAdmin.from("profiles").upsert(
-      {
-        id: authUser.user.id,
-        full_name: cleanName,
-        roll_number: cleanRoll,
-        course_id: courseId || null,
-        email: cleanEmail,
-        role: "student",
-        is_blocked: false,
-      },
-      { onConflict: "id" }
-    );
+    // 4. Upsert user into profiles with academic details
+    const profilePayload: Record<string, any> = {
+      id: authUser.user.id,
+      full_name: cleanName,
+      roll_number: cleanRoll,
+      course_id: courseId || null,
+      email: cleanEmail,
+      role: "student",
+      is_blocked: false,
+      college_name: cleanCollege,
+      education_level: cleanLevel,
+      stream: cleanStream,
+      course_name: cleanCourseName,
+      year_or_class: cleanYear,
+      last_active_at: new Date().toISOString(),
+      last_login_at: new Date().toISOString(),
+    };
+
+    const { error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .upsert(profilePayload, { onConflict: "id" });
 
     if (profileError) {
-      console.error("Profile creation error:", profileError);
+      console.warn("Profile extended upsert warning (falling back to base fields):", profileError.message);
+      // Fallback in case table schema columns are still propagating
+      await supabaseAdmin.from("profiles").upsert(
+        {
+          id: authUser.user.id,
+          full_name: cleanName,
+          roll_number: cleanRoll,
+          course_id: courseId || null,
+          email: cleanEmail,
+          role: "student",
+          is_blocked: false,
+        },
+        { onConflict: "id" }
+      );
     }
 
     return NextResponse.json({
