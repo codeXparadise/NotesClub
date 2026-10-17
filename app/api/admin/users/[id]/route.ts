@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { redisSMembers, redisDel, getUserActivities, getUserSearches } from "@/lib/redis";
 
 // GET /api/admin/users/[id]: Complete user profile dossier
 export async function GET(
@@ -30,28 +31,56 @@ export async function GET(
 
     const supabaseAdmin = createAdminClient();
 
-    // 1. Fetch student profile
-    const { data: rawStudent, error: studentError } = await supabaseAdmin
-      .from("profiles")
-      .select("*, courses(id, name, code)")
-      .eq("id", id)
-      .single();
+    // 1. Fetch student base profile & Auth metadata
+    const [profileRes, authUserRes] = await Promise.all([
+      supabaseAdmin
+        .from("profiles")
+        .select("*, courses(id, name, code)")
+        .eq("id", id)
+        .single(),
+      supabaseAdmin.auth.admin.getUserById(id),
+    ]);
 
-    if (studentError || !rawStudent) {
+    let rawStudent = profileRes.data;
+    const authUser = authUserRes.data?.user;
+
+    if (!rawStudent && !authUser) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
+    if (!rawStudent && authUser) {
+      const meta = authUser.user_metadata || {};
+      rawStudent = {
+        id: authUser.id,
+        full_name: meta.full_name || authUser.email?.split("@")[0] || "Student",
+        roll_number: meta.roll_number || null,
+        course_id: meta.course_id || null,
+        email: authUser.email,
+        role: "student",
+        is_blocked: false,
+        created_at: authUser.created_at,
+        updated_at: authUser.updated_at,
+      };
+      // Auto-heal into profiles table
+      supabaseAdmin.from("profiles").upsert(rawStudent, { onConflict: "id" }).then(() => {});
+    }
+
+    const meta = authUserRes.data?.user?.user_metadata || {};
+
     const student = {
       ...rawStudent,
-      college_name: rawStudent.college_name || "General / Unassigned",
-      stream: rawStudent.stream || rawStudent.courses?.name || "General",
-      education_level: rawStudent.education_level || "College",
-      year_or_class: rawStudent.year_or_class || "Year 1",
-      course_name: rawStudent.course_name || rawStudent.courses?.name || "Standard Notes",
+      full_name: meta.full_name || rawStudent.full_name || "Student",
+      roll_number: meta.roll_number || rawStudent.roll_number || "—",
+      division: meta.division || rawStudent.division || "—",
+      college_name: meta.college_name || rawStudent.college_name || "KES Shroff College",
+      stream: meta.stream || rawStudent.stream || rawStudent.courses?.name || "General",
+      education_level: meta.education_level || rawStudent.education_level || "College",
+      year_or_class: meta.year_or_class || rawStudent.year_or_class || "FY",
+      course_name: meta.course_name || rawStudent.course_name || rawStudent.courses?.name || "Standard Notes",
     };
 
     // 2. Fetch Reading History
-    const { data: readingHistory } = await supabaseAdmin
+    const { data: rawReadingHistory } = await supabaseAdmin
       .from("reading_progress")
       .select(`
         last_page,
@@ -63,38 +92,86 @@ export async function GET(
       .eq("student_id", id)
       .order("updated_at", { ascending: false });
 
-    // 3. Fetch Wishlist / Favorites
-    const { data: wishlist } = await supabaseAdmin
-      .from("favorites")
-      .select(`
-        created_at,
-        documents(id, title, cover_url, page_count)
-      `)
-      .eq("student_id", id)
-      .order("created_at", { ascending: false });
+    const readingHistory = rawReadingHistory || [];
 
-    // 4. Fetch Search History
-    const { data: searches } = await supabaseAdmin
-      .from("user_searches")
-      .select("id, query, created_at")
-      .eq("student_id", id)
-      .order("created_at", { ascending: false })
-      .limit(50);
+    // 3. Fetch Wishlist / Favorites from Redis
+    const favIds = await redisSMembers(`notes_club:fav_set:${id}`);
+    let wishlist: any[] = [];
+    if (favIds && favIds.length > 0) {
+      const { data: favDocs } = await supabaseAdmin
+        .from("documents")
+        .select("id, title, cover_url, page_count, drive_file_id, category_id, categories(name)")
+        .in("id", favIds);
 
-    // 5. Fetch Activity Logs (Profile updates, password changes, etc.)
-    const { data: activities } = await supabaseAdmin
-      .from("user_activities")
-      .select("id, activity_type, description, details, created_at")
-      .eq("user_id", id)
-      .order("created_at", { ascending: false })
-      .limit(50);
+      if (favDocs && favDocs.length > 0) {
+        wishlist = favDocs.map((doc: any) => ({
+          created_at: doc.created_at || new Date().toISOString(),
+          documents: doc,
+        }));
+      }
+    }
+
+    // 4. Fetch Search History from Redis
+    const searches = await getUserSearches(id, 50);
+
+    // 5. Fetch Activity Logs from Redis + synthesize full activity stream
+    const redisActivities = await getUserActivities(id, 50);
+
+    const combinedActivities: any[] = [...redisActivities];
+
+    // Add reading sessions into timeline
+    for (const rh of readingHistory) {
+      const docTitle = (rh as any).documents?.title || "Study Material";
+      combinedActivities.push({
+        id: `rh_${rh.updated_at}_${(rh as any).documents?.id || ""}`,
+        activity_type: "reading_session",
+        description: `Read "${docTitle}" (Page ${rh.last_page} of ${rh.total_pages || (rh as any).documents?.page_count || "?"} - ${rh.percent || 0}%)`,
+        details: { percent: rh.percent, last_page: rh.last_page },
+        created_at: rh.updated_at,
+      });
+    }
+
+    // Add wishlist items into timeline
+    for (const w of wishlist) {
+      const docTitle = w.documents?.title || "Study Note";
+      combinedActivities.push({
+        id: `fav_${w.documents?.id || ""}`,
+        activity_type: "wishlist_add",
+        description: `Saved "${docTitle}" to Wishlist`,
+        details: { documentId: w.documents?.id },
+        created_at: w.created_at,
+      });
+    }
+
+    // Add account creation event
+    if (rawStudent.created_at) {
+      combinedActivities.push({
+        id: `reg_${id}`,
+        activity_type: "account_created",
+        description: `Student account created (${student.roll_number || "Roll Number Registered"})`,
+        details: { rollNumber: student.roll_number, stream: student.stream },
+        created_at: rawStudent.created_at,
+      });
+    }
+
+    // Sort and deduplicate activities
+    const seenMap = new Set<string>();
+    const activities = combinedActivities
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .filter((act) => {
+        const key = `${act.activity_type}_${act.description}_${(act.created_at || "").slice(0, 16)}`;
+        if (seenMap.has(key)) return false;
+        seenMap.add(key);
+        return true;
+      })
+      .slice(0, 50);
 
     return NextResponse.json({
       student,
-      readingHistory: readingHistory || [],
-      wishlist: wishlist || [],
-      searches: searches || [],
-      activities: activities || [],
+      readingHistory,
+      wishlist,
+      searches,
+      activities,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -155,13 +232,15 @@ export async function POST(
     }
 
     if (action === "delete") {
-      // 1. Delete associated reading progress, favorites, and searches
+      // 1. Delete associated reading progress and requests
       await Promise.allSettled([
         supabaseAdmin.from("reading_progress").delete().eq("student_id", id),
-        supabaseAdmin.from("favorites").delete().eq("student_id", id),
-        supabaseAdmin.from("user_searches").delete().eq("student_id", id),
         supabaseAdmin.from("access_requests").delete().eq("student_id", id),
         supabaseAdmin.from("access_grants").delete().eq("student_id", id),
+        // Clean up Redis keys
+        redisDel(`notes_club:fav_set:${id}`),
+        redisDel(`notes_club:activities:${id}`),
+        redisDel(`notes_club:searches:${id}`),
       ]);
 
       // 2. Delete profile

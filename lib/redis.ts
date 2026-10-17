@@ -115,6 +115,8 @@ export async function cacheDel(key: string): Promise<void> {
   }
 }
 
+export const redisDel = cacheDel;
+
 /**
  * Invalidate all keys matching a prefix (e.g. "notes_club:docs:*")
  */
@@ -178,6 +180,183 @@ export async function redisSIsMember(key: string, member: string): Promise<boole
     return Boolean(res);
   } catch (err) {
     console.warn(`[Redis sIsMember] Failed for key "${key}":`, err);
+    return false;
+  }
+}
+
+export async function redisSCard(key: string): Promise<number> {
+  try {
+    const client = await getRedisClient();
+    if (!client) return 0;
+    return await client.sCard(key);
+  } catch (err) {
+    console.warn(`[Redis sCard] Failed for key "${key}":`, err);
+    return 0;
+  }
+}
+
+/**
+ * List operations for user activity and search history
+ */
+export async function redisLPush(key: string, value: string): Promise<boolean> {
+  try {
+    const client = await getRedisClient();
+    if (!client) return false;
+    await client.lPush(key, value);
+    return true;
+  } catch (err) {
+    console.warn(`[Redis lPush] Failed for key "${key}":`, err);
+    return false;
+  }
+}
+
+export async function redisLRange(key: string, start: number, stop: number): Promise<string[]> {
+  try {
+    const client = await getRedisClient();
+    if (!client) return [];
+    return await client.lRange(key, start, stop);
+  } catch (err) {
+    console.warn(`[Redis lRange] Failed for key "${key}":`, err);
+    return [];
+  }
+}
+
+export async function redisLTrim(key: string, start: number, stop: number): Promise<boolean> {
+  try {
+    const client = await getRedisClient();
+    if (!client) return false;
+    await client.lTrim(key, start, stop);
+    return true;
+  } catch (err) {
+    console.warn(`[Redis lTrim] Failed for key "${key}":`, err);
+    return false;
+  }
+}
+
+export interface UserActivityItem {
+  id?: string;
+  activity_type: string;
+  description: string;
+  details?: any;
+  created_at: string;
+}
+
+export async function logUserActivity(
+  userId: string,
+  activity: { activity_type: string; description: string; details?: any }
+): Promise<void> {
+  try {
+    const item: UserActivityItem = {
+      id: `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      activity_type: activity.activity_type,
+      description: activity.description,
+      details: activity.details || null,
+      created_at: new Date().toISOString(),
+    };
+    const key = `notes_club:activities:${userId}`;
+    await redisLPush(key, JSON.stringify(item));
+    await redisLTrim(key, 0, 99); // Keep latest 100 activities
+  } catch (err) {
+    console.warn(`[logUserActivity] Failed for user "${userId}":`, err);
+  }
+}
+
+export async function getUserActivities(userId: string, limit: number = 50): Promise<UserActivityItem[]> {
+  try {
+    const key = `notes_club:activities:${userId}`;
+    const raw = await redisLRange(key, 0, limit - 1);
+    return raw.map((r) => {
+      try {
+        return JSON.parse(r);
+      } catch {
+        return {
+          activity_type: "general",
+          description: r,
+          created_at: new Date().toISOString(),
+        };
+      }
+    });
+  } catch (err) {
+    console.warn(`[getUserActivities] Failed for user "${userId}":`, err);
+    return [];
+  }
+}
+
+export interface UserSearchItem {
+  id?: string;
+  query: string;
+  created_at: string;
+}
+
+export async function logUserSearch(userId: string, query: string): Promise<void> {
+  try {
+    const item: UserSearchItem = {
+      id: `srch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      query,
+      created_at: new Date().toISOString(),
+    };
+    const key = `notes_club:searches:${userId}`;
+    await redisLPush(key, JSON.stringify(item));
+    await redisLTrim(key, 0, 99); // Keep latest 100 searches
+
+    // Also record in activity feed
+    await logUserActivity(userId, {
+      activity_type: "search",
+      description: `Searched for "${query}"`,
+      details: { query },
+    });
+  } catch (err) {
+    console.warn(`[logUserSearch] Failed for user "${userId}":`, err);
+  }
+}
+
+export async function getUserSearches(userId: string, limit: number = 50): Promise<UserSearchItem[]> {
+  try {
+    const key = `notes_club:searches:${userId}`;
+    const raw = await redisLRange(key, 0, limit - 1);
+    return raw.map((r) => {
+      try {
+        return JSON.parse(r);
+      } catch {
+        return {
+          query: r,
+          created_at: new Date().toISOString(),
+        };
+      }
+    });
+  } catch (err) {
+    console.warn(`[getUserSearches] Failed for user "${userId}":`, err);
+    return [];
+  }
+}
+
+export async function clearUserSearches(userId: string): Promise<boolean> {
+  try {
+    const key = `notes_club:searches:${userId}`;
+    const client = await getRedisClient();
+    if (!client) return false;
+    await client.del(key);
+    return true;
+  } catch (err) {
+    console.warn(`[clearUserSearches] Failed for user "${userId}":`, err);
+    return false;
+  }
+}
+
+export async function deleteUserSearch(userId: string, targetQuery: string): Promise<boolean> {
+  try {
+    const key = `notes_club:searches:${userId}`;
+    const searches = await getUserSearches(userId, 100);
+    const filtered = searches.filter((s) => s.query.toLowerCase() !== targetQuery.toLowerCase());
+    const client = await getRedisClient();
+    if (!client) return false;
+    await client.del(key);
+    for (let i = filtered.length - 1; i >= 0; i--) {
+      await redisLPush(key, JSON.stringify(filtered[i]));
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[deleteUserSearch] Failed for user "${userId}":`, err);
     return false;
   }
 }

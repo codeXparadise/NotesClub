@@ -1,7 +1,13 @@
 import { google } from "googleapis";
 import { Readable } from "stream";
 
+let cachedDriveClient: ReturnType<typeof google.drive> | null = null;
+
 export function getDriveClient() {
+  if (cachedDriveClient) {
+    return cachedDriveClient;
+  }
+
   const saJsonB64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!saJsonB64) {
     return null;
@@ -26,13 +32,14 @@ export function getDriveClient() {
     scopes: ["https://www.googleapis.com/auth/drive.readonly"],
   });
 
-  return google.drive({ version: "v3", auth });
+  cachedDriveClient = google.drive({ version: "v3", auth });
+  return cachedDriveClient;
 }
 
 /**
  * Streams file bytes directly from Google Drive using the service account.
  */
-export async function getDriveFileStream(fileId: string): Promise<{
+export async function getDriveFileStream(fileId: string, knownMimeType?: string): Promise<{
   stream: Readable;
   mimeType: string;
   size?: number;
@@ -43,6 +50,23 @@ export async function getDriveFileStream(fileId: string): Promise<{
   }
 
   try {
+    // Fast path: If MIME type is already known and not a proprietary Google Doc, fetch media directly
+    if (knownMimeType && !knownMimeType.includes("vnd.google-apps")) {
+      const response = await drive.files.get(
+        {
+          fileId,
+          alt: "media",
+          supportsAllDrives: true,
+        },
+        { responseType: "stream" }
+      );
+
+      return {
+        stream: response.data as Readable,
+        mimeType: knownMimeType,
+      };
+    }
+
     // Get file metadata first
     const meta = await drive.files.get({
       fileId,

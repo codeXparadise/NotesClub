@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyStreamToken } from "@/lib/token";
 import { getDriveFileStream } from "@/lib/drive";
 import { cacheGet, cacheSet } from "@/lib/redis";
-import { Readable } from "stream";
+import { Readable, PassThrough } from "stream";
 import fs from "fs";
 import path from "path";
 
@@ -157,14 +157,44 @@ export async function GET(
       const admin = createAdminClient();
       const { data: profile } = await admin
         .from("profiles")
-        .select("id, is_blocked")
+        .select("id, is_blocked, course_id")
         .eq("id", studentId)
-        .single();
+        .maybeSingle();
 
-      if (!profile || profile.is_blocked) {
+      if (profile?.is_blocked) {
         await cacheSet(profileCacheKey, false, 300);
         return new NextResponse("Account blocked or not authorized", { status: 403 });
       }
+
+      if (!profile) {
+        // Auto-heal: verify auth user exists
+        const { data: authUser } = await admin.auth.admin.getUserById(studentId);
+        if (authUser?.user) {
+          const userMeta = authUser.user.user_metadata || {};
+          await admin.from("profiles").upsert(
+            {
+              id: studentId,
+              full_name: userMeta.full_name || "Student",
+              email: authUser.user.email || "",
+              roll_number: userMeta.roll_number || null,
+              course_id: userMeta.course_id || "b22ae884-83a8-4aef-a710-cddb1af60854",
+              role: "student",
+              is_blocked: false,
+            },
+            { onConflict: "id" }
+          );
+        } else {
+          await cacheSet(profileCacheKey, false, 300);
+          return new NextResponse("Account not authorized", { status: 403 });
+        }
+      } else if (!profile.course_id) {
+        // Auto-heal missing course_id on profile so student is never broken
+        await admin
+          .from("profiles")
+          .update({ course_id: "b22ae884-83a8-4aef-a710-cddb1af60854" })
+          .eq("id", studentId);
+      }
+
       await cacheSet(profileCacheKey, true, 300);
     } else if (isStudentAllowed === false) {
       return new NextResponse("Account blocked or not authorized", { status: 403 });
@@ -183,12 +213,24 @@ export async function GET(
 
     // 6. Check Local Disk Cache for Sub-10ms Instant Delivery
     const safeDriveId = (doc.drive_file_id || id).replace(/[^a-zA-Z0-9_-]/g, "_");
-    const cachedFilePath = path.join(CACHE_DIR, `${safeDriveId}.bin`);
-    const cachedMetaPath = path.join(CACHE_DIR, `${safeDriveId}.meta.json`);
+    let cachedFilePath = path.join(CACHE_DIR, `${safeDriveId}.bin`);
+    let cachedMetaPath = path.join(CACHE_DIR, `${safeDriveId}.meta.json`);
 
-    if (fs.existsSync(cachedFilePath) && fs.existsSync(cachedMetaPath)) {
+    if (!fs.existsSync(cachedFilePath)) {
+      const altBin = path.join(CACHE_DIR, `${id}.bin`);
+      const altMeta = path.join(CACHE_DIR, `${id}.meta.json`);
+      if (fs.existsSync(altBin)) {
+        cachedFilePath = altBin;
+        cachedMetaPath = altMeta;
+      }
+    }
+
+    if (fs.existsSync(cachedFilePath)) {
       try {
-        const meta = JSON.parse(fs.readFileSync(cachedMetaPath, "utf-8"));
+        let meta = { mimeType: doc.mime_type || "application/pdf" };
+        if (fs.existsSync(cachedMetaPath)) {
+          meta = JSON.parse(fs.readFileSync(cachedMetaPath, "utf-8"));
+        }
         const stat = fs.statSync(cachedFilePath);
         const etag = `W/"${safeDriveId}-${stat.size}"`;
 
@@ -202,19 +244,8 @@ export async function GET(
           });
         }
 
-        const nodeStream = fs.createReadStream(cachedFilePath);
-        const webStream =
-          typeof (Readable as any).toWeb === "function"
-            ? (Readable as any).toWeb(nodeStream)
-            : new ReadableStream({
-                start(controller) {
-                  nodeStream.on("data", (chunk) => controller.enqueue(chunk));
-                  nodeStream.on("end", () => controller.close());
-                  nodeStream.on("error", (err) => controller.error(err));
-                },
-              });
-
-        return new NextResponse(webStream as any, {
+        const fileBuffer = fs.readFileSync(cachedFilePath);
+        return new NextResponse(new Uint8Array(fileBuffer), {
           headers: {
             "Content-Type": meta.mimeType || doc.mime_type || "application/pdf",
             "Content-Length": stat.size.toString(),
@@ -230,19 +261,21 @@ export async function GET(
       }
     }
 
-    // 7. Cache Miss: Stream from Google Drive and write to Disk Cache
-    const driveResult = await getDriveFileStream(doc.drive_file_id);
+    // 7. Cache Miss: Stream from Google Drive directly to browser and Disk Cache simultaneously
+    const driveResult = await getDriveFileStream(doc.drive_file_id, doc.mime_type);
 
     if (driveResult?.stream) {
       try {
-        // Collect chunks in background for caching
-        const chunks: Buffer[] = [];
+        const passThrough = new PassThrough();
+        const diskChunks: Buffer[] = [];
+
         driveResult.stream.on("data", (chunk: Buffer) => {
-          chunks.push(Buffer.from(chunk));
+          diskChunks.push(Buffer.from(chunk));
         });
+
         driveResult.stream.on("end", () => {
           try {
-            const fullBuf = Buffer.concat(chunks);
+            const fullBuf = Buffer.concat(diskChunks);
             fs.writeFileSync(cachedFilePath, fullBuf);
             fs.writeFileSync(
               cachedMetaPath,
@@ -253,27 +286,25 @@ export async function GET(
               })
             );
           } catch (writeErr) {
-            console.warn("[File Cache] Write error:", writeErr);
+            console.warn("[File Cache] Async write error:", writeErr);
           }
         });
 
-        const webStream =
-          typeof (Readable as any).toWeb === "function"
-            ? (Readable as any).toWeb(driveResult.stream)
-            : new ReadableStream({
-                start(controller) {
-                  driveResult.stream.on("data", (chunk) => controller.enqueue(chunk));
-                  driveResult.stream.on("end", () => controller.close());
-                  driveResult.stream.on("error", (err) => controller.error(err));
-                },
-              });
+        driveResult.stream.on("error", (streamErr) => {
+          console.warn("[File Stream] Drive stream error:", streamErr);
+          passThrough.destroy(streamErr);
+        });
+
+        const pipedStream = driveResult.stream.pipe(passThrough);
+        const webStream = Readable.toWeb(pipedStream);
 
         return new NextResponse(webStream as any, {
           headers: {
             "Content-Type": driveResult.mimeType || doc.mime_type || "application/pdf",
+            ...(driveResult.size ? { "Content-Length": driveResult.size.toString() } : {}),
             "Content-Disposition": 'inline; filename="protected-document.pdf"',
             "Cache-Control": "private, max-age=86400, stale-while-revalidate=604800",
-            "X-Cache": "MISS-FETCHED",
+            "X-Cache": "STREAM-DIRECT",
             "X-Content-Type-Options": "nosniff",
           },
         });
@@ -287,6 +318,7 @@ export async function GET(
     return new NextResponse(new Uint8Array(mockPdfBuffer), {
       headers: {
         "Content-Type": "application/pdf",
+        "Content-Length": mockPdfBuffer.length.toString(),
         "Content-Disposition": 'inline; filename="notes-club.pdf"',
         "Cache-Control": "private, max-age=3600, stale-while-revalidate=86400",
         "X-Content-Type-Options": "nosniff",

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logUserSearch } from "@/lib/redis";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,17 +20,8 @@ export async function POST(request: NextRequest) {
 
     const cleanQuery = query.trim().slice(0, 100);
 
-    // Save search log
-    await supabase.from("user_searches").insert({
-      student_id: user.id,
-      query: cleanQuery,
-    });
-
-    // Also update last_active_at on profile
-    await supabase
-      .from("profiles")
-      .update({ last_active_at: new Date().toISOString() })
-      .eq("id", user.id);
+    // Log search query in Redis (saved in search history & activity timeline)
+    await logUserSearch(user.id, cleanQuery);
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

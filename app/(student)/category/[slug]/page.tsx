@@ -563,13 +563,13 @@ export default function CategoryDetailPage({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredDocuments.map((doc) => {
                 const badge = getFileBadge(doc.mime_type, doc.title);
-                // Filename-like URL slug
-                const bookUrl = `/read/${encodeURIComponent(doc.slug)}`;
+                const bookUrl = `/read/${doc.id}`;
 
                 return (
                   <Link
                     key={doc.id}
                     href={bookUrl}
+                    prefetch={true}
                     className="group flex flex-col justify-between rounded-[18px] border p-4 sm:p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-md select-none"
                     style={{
                       backgroundColor: "var(--surface)",

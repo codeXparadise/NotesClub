@@ -163,19 +163,6 @@ export const SecurityShield: React.FC<SecurityShieldProps> = ({
         return false;
       }
 
-      // Block Ctrl+C / Cmd+C (Copy)
-      if (isCtrlOrMeta && (key === "c" || code === "keyc")) {
-        e.preventDefault();
-        showWarning("Copying text or content is strictly disabled.");
-        return false;
-      }
-
-      // Block Ctrl+A / Cmd+A (Select All)
-      if (isCtrlOrMeta && (key === "a" || code === "keya")) {
-        e.preventDefault();
-        return false;
-      }
-
       // Block F12 and DevTools shortcuts
       if (
         key === "f12" ||

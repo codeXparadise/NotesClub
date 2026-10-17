@@ -26,9 +26,13 @@ import {
   X,
   Smartphone,
   Heart,
+  ScrollText,
+  BookOpen,
+  Search,
 } from "lucide-react";
 import { Watermark } from "./Watermark";
 import { SecurityShield } from "./SecurityShield";
+import { PdfPageItem } from "./PdfPageItem";
 
 interface DocumentReaderProps {
   documentId: string;
@@ -45,7 +49,7 @@ interface DocumentReaderProps {
 // Global in-memory buffer cache across components to avoid re-fetching on navigation
 const documentBufferCache = new Map<string, ArrayBuffer>();
 
-// Standalone script loader
+// Standalone script loader with local vendor priority and CDN fallback
 function loadExternalScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof window === "undefined") return resolve();
@@ -74,8 +78,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
 }) => {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const renderTaskRef = useRef<any>(null);
+  const mainScrollRef = useRef<HTMLDivElement>(null);
 
   // General State
   const [docFormat, setDocFormat] = useState<"pdf" | "docx" | "excel" | "markdown">("pdf");
@@ -84,12 +87,15 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [scale, setScale] = useState(1.0);
+  const [containerWidth, setContainerWidth] = useState(800);
+
+  // View Mode: Continuous Vertical Scroll (Default) vs Single Page Flip
+  const [viewMode, setViewMode] = useState<"continuous" | "single">("continuous");
 
   // PDF specific state
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(initialPage);
   const [totalPages, setTotalPages] = useState(1);
-  const [isRenderingPage, setIsRenderingPage] = useState(false);
   const [pageInput, setPageInput] = useState(initialPage.toString());
 
   // Navigation Utilities State
@@ -101,18 +107,27 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
   const [htmlContent, setHtmlContent] = useState<string>("");
   const [excelSheets, setExcelSheets] = useState<{ name: string; html: string }[]>([]);
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
+  const [excelSearchQuery, setExcelSearchQuery] = useState("");
 
   // Favorites / Wishlist State
   const [isFavorited, setIsFavorited] = useState(false);
   const [isFavLoading, setIsFavLoading] = useState(false);
 
-  // Touch gesture & Pinch-to-zoom refs
-  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
-  const initialPinchDistRef = useRef<number | null>(null);
-  const initialPinchScaleRef = useRef<number>(1);
-  const lastTapTimeRef = useRef<number>(0);
-  const isPinchingRef = useRef<boolean>(false);
+  // Measure container width for responsive scaling
+  useEffect(() => {
+    const updateWidth = () => {
+      if (mainScrollRef.current) {
+        setContainerWidth(mainScrollRef.current.clientWidth);
+      } else if (typeof window !== "undefined") {
+        setContainerWidth(window.innerWidth);
+      }
+    };
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  }, []);
 
+  // Fetch Wishlist status
   useEffect(() => {
     let cancelled = false;
     fetch("/api/favorites")
@@ -155,36 +170,6 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
     }
   };
 
-  // Detect format
-  useEffect(() => {
-    const lowerTitle = documentTitle.toLowerCase();
-    const lowerMime = (mimeType || "").toLowerCase();
-
-    if (lowerTitle.endsWith(".docx") || lowerTitle.endsWith(".doc") || lowerMime.includes("word")) {
-      setDocFormat("docx");
-    } else if (
-      lowerTitle.endsWith(".xlsx") ||
-      lowerTitle.endsWith(".xls") ||
-      lowerTitle.endsWith(".csv") ||
-      lowerMime.includes("spreadsheet") ||
-      lowerMime.includes("excel")
-    ) {
-      setDocFormat("excel");
-    } else if (
-      lowerTitle.endsWith(".md") ||
-      lowerTitle.endsWith(".txt") ||
-      lowerTitle.endsWith(".htm") ||
-      lowerTitle.endsWith(".html") ||
-      lowerMime.includes("markdown") ||
-      lowerMime === "text/plain" ||
-      lowerMime === "text/html"
-    ) {
-      setDocFormat("markdown");
-    } else {
-      setDocFormat("pdf");
-    }
-  }, [documentTitle, mimeType]);
-
   // Save progress back to server
   const saveProgress = useCallback(
     async (page: number, total: number) => {
@@ -205,7 +190,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
     [documentId]
   );
 
-  // Fetch document bytes (using in-memory cache when available)
+  // Fetch document bytes & detect format using Magic Bytes + Filename + MIME
   useEffect(() => {
     let isCancelled = false;
 
@@ -214,86 +199,224 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
       setErrorMessage(null);
 
       try {
-        let arrayBuffer: ArrayBuffer;
+        let arrayBuffer: ArrayBuffer | null = null;
 
         if (documentBufferCache.has(documentId)) {
           arrayBuffer = documentBufferCache.get(documentId)!;
         } else {
-          const fileUrl = `/api/file/${documentId}?token=${encodeURIComponent(streamToken)}`;
-          const response = await fetch(fileUrl);
-
-          if (!response.ok) {
-            if (response.status === 403) {
-              throw new Error("Access restricted. Please refresh or verify permissions.");
+          // 1. Check Browser CacheStorage (instant sub-5ms local load without network request)
+          let cachedFromBrowser = false;
+          if (typeof window !== "undefined" && "caches" in window) {
+            try {
+              const cache = await caches.open("notesclub_doc_cache_v1");
+              const cachedResp = await cache.match(`/doc-cache/${documentId}`);
+              if (cachedResp) {
+                arrayBuffer = await cachedResp.arrayBuffer();
+                documentBufferCache.set(documentId, arrayBuffer);
+                cachedFromBrowser = true;
+              }
+            } catch (cacheErr) {
+              console.warn("Browser CacheStorage read ignored:", cacheErr);
             }
-            throw new Error(`Failed to load document (${response.status})`);
           }
 
-          arrayBuffer = await response.arrayBuffer();
-          documentBufferCache.set(documentId, arrayBuffer);
+          if (!cachedFromBrowser) {
+            const fileUrl = `/api/file/${documentId}?token=${encodeURIComponent(streamToken)}`;
+            let response: Response;
+            try {
+              response = await fetch(fileUrl);
+            } catch {
+              // Automatic retry after 600ms on network blip
+              await new Promise((r) => setTimeout(r, 600));
+              response = await fetch(fileUrl);
+            }
+
+            if (!response.ok) {
+              if (response.status === 403) {
+                throw new Error("Access restricted. Please refresh or verify permissions.");
+              }
+              throw new Error(`Failed to load document (${response.status})`);
+            }
+
+            arrayBuffer = await response.arrayBuffer();
+            documentBufferCache.set(documentId, arrayBuffer);
+
+            // Persist to browser CacheStorage for future 0ms loads
+            if (typeof window !== "undefined" && "caches" in window) {
+              try {
+                const cache = await caches.open("notesclub_doc_cache_v1");
+                const mime = response.headers.get("Content-Type") || "application/pdf";
+                await cache.put(
+                  `/doc-cache/${documentId}`,
+                  new Response(arrayBuffer.slice(0), {
+                    headers: { "Content-Type": mime },
+                  })
+                );
+              } catch (cacheWriteErr) {
+                console.warn("Browser CacheStorage write skipped:", cacheWriteErr);
+              }
+            }
+          }
         }
 
         if (isCancelled) return;
+        if (!arrayBuffer) {
+          throw new Error("Could not retrieve document stream. Please try again.");
+        }
 
-        // Render based on format
-        if (docFormat === "docx") {
-          await loadExternalScript("https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js");
-          const mammoth = (window as any).mammoth;
-          if (!mammoth) throw new Error("Document previewer not ready. Please refresh.");
-          const result = await mammoth.convertToHtml({ arrayBuffer });
-          if (!isCancelled) {
-            setHtmlContent(result.value || "<p>Empty document</p>");
-            setTotalPages(1);
+        // Magic byte detection
+        const uint8 = new Uint8Array(arrayBuffer);
+        const isPdf =
+          uint8.length >= 4 &&
+          uint8[0] === 0x25 &&
+          uint8[1] === 0x50 &&
+          uint8[2] === 0x44 &&
+          uint8[3] === 0x46; // %PDF
+
+        const isZip =
+          uint8.length >= 4 &&
+          uint8[0] === 0x50 &&
+          uint8[1] === 0x4b; // PK (Office XML / Zip)
+
+        const lowerTitle = documentTitle.toLowerCase();
+        const lowerMime = (mimeType || "").toLowerCase();
+
+        // 1. WORD DOCUMENT (.docx, .doc)
+        if (
+          lowerTitle.endsWith(".docx") ||
+          lowerTitle.endsWith(".doc") ||
+          lowerMime.includes("word") ||
+          (isZip && (lowerTitle.includes("doc") || !lowerTitle.includes("xls")))
+        ) {
+          try {
+            // Load local mammoth script first, fallback to CDN
+            await loadExternalScript("/vendor/mammoth.browser.min.js").catch(() =>
+              loadExternalScript("https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js")
+            );
+
+            const mammoth = (window as any).mammoth;
+            if (mammoth) {
+              const result = await mammoth.convertToHtml({ arrayBuffer });
+              if (!isCancelled) {
+                setDocFormat("docx");
+                setHtmlContent(result.value || "<p>Empty document</p>");
+                setTotalPages(1);
+                setIsLoading(false);
+                return;
+              }
+            }
+          } catch (docxErr) {
+            console.warn("Mammoth conversion failed, trying fallback:", docxErr);
           }
-        } else if (docFormat === "excel") {
-          await loadExternalScript("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js");
-          const XLSX = (window as any).XLSX;
-          if (!XLSX) throw new Error("Spreadsheet previewer not ready. Please refresh.");
-          const workbook = XLSX.read(arrayBuffer, { type: "array" });
-          const sheets = workbook.SheetNames.map((sheetName: string) => ({
-            name: sheetName,
-            html: XLSX.utils.sheet_to_html(workbook.Sheets[sheetName], {
-              header: "",
-              footer: "",
-            }),
-          }));
-          if (!isCancelled) {
-            setExcelSheets(sheets);
-            setActiveSheetIndex(0);
-            setTotalPages(sheets.length || 1);
+        }
+
+        // 2. EXCEL SPREADSHEET (.xlsx, .xls, .csv)
+        if (
+          lowerTitle.endsWith(".xlsx") ||
+          lowerTitle.endsWith(".xls") ||
+          lowerTitle.endsWith(".csv") ||
+          lowerMime.includes("spreadsheet") ||
+          lowerMime.includes("excel") ||
+          (isZip && lowerTitle.includes("xls"))
+        ) {
+          try {
+            // Load local xlsx script first, fallback to CDN
+            await loadExternalScript("/vendor/xlsx.full.min.js").catch(() =>
+              loadExternalScript("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js")
+            );
+
+            const XLSX = (window as any).XLSX;
+            if (XLSX) {
+              const workbook = XLSX.read(arrayBuffer, { type: "array" });
+              if (workbook.SheetNames && workbook.SheetNames.length > 0) {
+                const sheets = workbook.SheetNames.map((sheetName: string) => ({
+                  name: sheetName,
+                  html: XLSX.utils.sheet_to_html(workbook.Sheets[sheetName], {
+                    header: "",
+                    footer: "",
+                  }),
+                }));
+
+                if (!isCancelled) {
+                  setDocFormat("excel");
+                  setExcelSheets(sheets);
+                  setActiveSheetIndex(0);
+                  setTotalPages(sheets.length || 1);
+                  setIsLoading(false);
+                  return;
+                }
+              }
+            }
+          } catch (xlsErr) {
+            console.warn("XLSX parsing failed, trying fallback:", xlsErr);
           }
-        } else if (docFormat === "markdown") {
-          const text = new TextDecoder().decode(arrayBuffer);
+        }
+
+        // 3. CODE / TEXT / MARKDOWN
+        if (
+          !isPdf &&
+          !isZip &&
+          (lowerTitle.endsWith(".md") ||
+            lowerTitle.endsWith(".txt") ||
+            lowerTitle.endsWith(".htm") ||
+            lowerTitle.endsWith(".html") ||
+            lowerTitle.endsWith(".json") ||
+            lowerTitle.endsWith(".js") ||
+            lowerTitle.endsWith(".py") ||
+            lowerTitle.endsWith(".cpp") ||
+            lowerTitle.endsWith(".java") ||
+            lowerMime.includes("text") ||
+            lowerMime.includes("json"))
+        ) {
+          const text = new TextDecoder("utf-8").decode(arrayBuffer);
           if (!isCancelled) {
+            setDocFormat("markdown");
             setHtmlContent(text);
             setTotalPages(1);
+            setIsLoading(false);
+            return;
           }
-        } else {
-          // PDF renderer using robust CDN bundle
-          await loadExternalScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js");
-          const pdfjs = (window as any).pdfjsLib;
-          if (!pdfjs) throw new Error("PDF renderer not ready. Please refresh.");
-
-          pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
-
-          const loadingTask = pdfjs.getDocument({
-            data: arrayBuffer,
-            cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",
-            cMapPacked: true,
-          });
-
-          const doc = await loadingTask.promise;
-          if (isCancelled) return;
-
-          setPdfDoc(doc);
-          const count = doc.numPages;
-          setTotalPages(count);
-
-          const validStart = Math.min(Math.max(1, initialPage), count);
-          setCurrentPage(validStart);
-          setPageInput(validStart.toString());
-          saveProgress(validStart, count);
         }
+
+        // 4. PDF DOCUMENT (Default & Standard)
+        setDocFormat("pdf");
+        // Load local PDF.js script first, fallback to CDN
+        await loadExternalScript("/vendor/pdf.min.js").catch(() =>
+          loadExternalScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js")
+        );
+
+        const pdfjs = (window as any).pdfjsLib;
+        if (!pdfjs) throw new Error("PDF renderer not ready. Please refresh.");
+
+        pdfjs.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.js";
+
+        const loadingTask = pdfjs.getDocument({
+          data: arrayBuffer,
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",
+          cMapPacked: true,
+        });
+
+        const doc = await loadingTask.promise;
+        if (isCancelled) return;
+
+        setPdfDoc(doc);
+        const count = doc.numPages;
+        setTotalPages(count);
+
+        const validStart = Math.min(Math.max(1, initialPage), count);
+        setCurrentPage(validStart);
+        setPageInput(validStart.toString());
+        saveProgress(validStart, count);
+
+        // Scroll to initial page if continuous scroll and starting page > 1
+        setTimeout(() => {
+          if (validStart > 1) {
+            document.getElementById(`pdf-page-${validStart}`)?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }
+        }, 300);
       } catch (err: any) {
         console.error("Document loader error:", err);
         if (!isCancelled) {
@@ -311,246 +434,65 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [documentId, streamToken, docFormat, initialPage, saveProgress]);
+  }, [documentId, streamToken, documentTitle, mimeType, initialPage, saveProgress]);
 
-  // High-DPI Canvas Page Renderer with Background Pre-fetching
-  const renderPdfPage = useCallback(
-    async (pageNumber: number) => {
-      if (!pdfDoc || !canvasRef.current) return;
+  // Smooth Zoom Handlers with Clamp
+  const handleZoomIn = useCallback(() => {
+    setScale((prev) => {
+      const next = Math.min(Math.round((prev + 0.15) * 100) / 100, 3.0);
+      setSwipeIndicator(`${Math.round(next * 100)}% Zoom In`);
+      setTimeout(() => setSwipeIndicator(null), 900);
+      return next;
+    });
+  }, []);
 
-      try {
-        setIsRenderingPage(true);
+  const handleZoomOut = useCallback(() => {
+    setScale((prev) => {
+      const next = Math.max(Math.round((prev - 0.15) * 100) / 100, 0.5);
+      setSwipeIndicator(`${Math.round(next * 100)}% Zoom Out`);
+      setTimeout(() => setSwipeIndicator(null), 900);
+      return next;
+    });
+  }, []);
 
-        if (renderTaskRef.current) {
-          renderTaskRef.current.cancel();
-        }
+  const handleResetZoom = useCallback(() => {
+    setScale(1.0);
+    setSwipeIndicator("100% Fit Width");
+    setTimeout(() => setSwipeIndicator(null), 900);
+  }, []);
 
-        const page = await pdfDoc.getPage(pageNumber);
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const containerWidth =
-          containerRef.current?.clientWidth || window.innerWidth;
-        const baseViewport = page.getViewport({ scale: 1 });
-
-        let computedScale = scale;
-        if (containerWidth < 768) {
-          // Mobile reading: crisp fit with comfortable margins
-          const fitWidthScale = Math.min((containerWidth - 24) / baseViewport.width, 1.25);
-          computedScale = fitWidthScale * scale;
-        } else {
-          // Desktop: generous reading page width
-          const fitWidthScale = Math.min((containerWidth - 32) / baseViewport.width, 1.4);
-          computedScale = fitWidthScale * scale;
-        }
-
-        const viewport = page.getViewport({ scale: computedScale });
-        const pixelRatio = window.devicePixelRatio || 1;
-
-        canvas.width = Math.floor(viewport.width * pixelRatio);
-        canvas.height = Math.floor(viewport.height * pixelRatio);
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
-
-        const ctx = canvas.getContext("2d", { alpha: false });
-        if (!ctx) return;
-
-        ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-
-        const renderContext = {
-          canvasContext: ctx,
-          viewport,
-        };
-
-        const task = page.render(renderContext);
-        renderTaskRef.current = task;
-        await task.promise;
-
-        // Pre-fetch next page in background for zero-latency page flips
-        if (pageNumber < pdfDoc.numPages) {
-          pdfDoc.getPage(pageNumber + 1).catch(() => {});
-        }
-        if (pageNumber > 1) {
-          pdfDoc.getPage(pageNumber - 1).catch(() => {});
-        }
-      } catch (err: any) {
-        if (err?.name !== "RenderingCancelledException") {
-          console.error("Canvas render error:", err);
-        }
-      } finally {
-        setIsRenderingPage(false);
-      }
-    },
-    [pdfDoc, scale]
-  );
-
-  useEffect(() => {
-    if (pdfDoc && docFormat === "pdf") {
-      renderPdfPage(currentPage);
-    }
-  }, [pdfDoc, currentPage, scale, docFormat, renderPdfPage]);
-
-  // Re-render canvas cleanly when security shield drops after intercepted capture
-  useEffect(() => {
-    const handleRestore = () => {
-      if (pdfDoc && docFormat === "pdf") {
-        renderPdfPage(currentPage);
-      }
-    };
-    window.addEventListener("notesclub:security-restore", handleRestore);
-    return () => {
-      window.removeEventListener("notesclub:security-restore", handleRestore);
-    };
-  }, [pdfDoc, docFormat, currentPage, renderPdfPage]);
-
-  // Page navigation handlers
-  const goToNextPage = useCallback(() => {
-    if (currentPage < totalPages) {
-      const next = currentPage + 1;
-      setCurrentPage(next);
-      setPageInput(next.toString());
-      saveProgress(next, totalPages);
-    }
-  }, [currentPage, totalPages, saveProgress]);
-
-  const goToPrevPage = useCallback(() => {
-    if (currentPage > 1) {
-      const prev = currentPage - 1;
-      setCurrentPage(prev);
-      setPageInput(prev.toString());
-      saveProgress(prev, totalPages);
-    }
-  }, [currentPage, totalPages, saveProgress]);
-
-  const jumpToPage = useCallback(
-    (page: number) => {
-      const target = Math.min(Math.max(1, page), totalPages);
-      setCurrentPage(target);
-      setPageInput(target.toString());
-      saveProgress(target, totalPages);
-      setIsDrawerOpen(false);
-    },
-    [totalPages, saveProgress]
-  );
-
-  // Touch Gesture Handlers (Pinch-to-zoom, Double-tap zoom, & Horizontal Swipe)
-  const handleTouchStart = (e: React.TouchEvent) => {
-    // 1. Two fingers: Initialize Pinch-to-Zoom
-    if (e.touches.length === 2) {
-      isPinchingRef.current = true;
-      touchStartRef.current = null;
-      const touch1 = e.touches[0];
-      const touch2 = e.touches[1];
-      const dist = Math.hypot(
-        touch1.clientX - touch2.clientX,
-        touch1.clientY - touch2.clientY
-      );
-      initialPinchDistRef.current = dist;
-      initialPinchScaleRef.current = scale;
-      return;
-    }
-
-    // 2. Single finger: Check for Double-tap to zoom or start swipe
-    if (e.touches.length === 1) {
-      const now = Date.now();
-      const timeSinceLastTap = now - lastTapTimeRef.current;
-
-      // Double-tap detected (< 320ms between taps)
-      if (timeSinceLastTap > 0 && timeSinceLastTap < 320) {
-        touchStartRef.current = null;
-        lastTapTimeRef.current = 0;
-        setScale((prev) => {
-          const next = prev > 1.2 ? 1.0 : 1.8;
-          setSwipeIndicator(next === 1.0 ? "100% Fit Width" : "180% Zoomed In");
-          setTimeout(() => setSwipeIndicator(null), 1000);
-          return next;
-        });
-        return;
-      }
-
-      lastTapTimeRef.current = now;
-      touchStartRef.current = {
-        x: e.touches[0].clientX,
-        y: e.touches[0].clientY,
-        time: now,
-      };
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    // Handle 2-finger pinch zoom
-    if (e.touches.length === 2 && initialPinchDistRef.current) {
-      isPinchingRef.current = true;
-      const touch1 = e.touches[0];
-      const touch2 = e.touches[1];
-      const currentDist = Math.hypot(
-        touch1.clientX - touch2.clientX,
-        touch1.clientY - touch2.clientY
-      );
-      const ratio = currentDist / initialPinchDistRef.current;
-      const rawScale = Math.min(
-        Math.max(0.75, initialPinchScaleRef.current * ratio),
-        3.5
-      );
-      // Step by 0.05 to avoid micro-render thrashing while keeping fluid responsiveness
-      const steppedScale = Math.round(rawScale * 20) / 20;
-      if (Math.abs(steppedScale - scale) >= 0.05) {
-        setScale(steppedScale);
-      }
-      setSwipeIndicator(`${Math.round(steppedScale * 100)}% Zoom`);
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    // End pinch zoom gesture
-    if (e.touches.length < 2 && isPinchingRef.current) {
-      isPinchingRef.current = false;
-      initialPinchDistRef.current = null;
-      setTimeout(() => setSwipeIndicator(null), 800);
-      return;
-    }
-
-    // Handle horizontal page flip swipe (only active when scale <= 1.25 so user can pan while zoomed)
-    if (!touchStartRef.current) return;
-    const start = touchStartRef.current;
-    touchStartRef.current = null;
-
-    if (scale > 1.25) return; // Zoomed in: let user scroll/pan freely without flipping pages
-
-    if (e.changedTouches && e.changedTouches.length > 0) {
-      const deltaX = e.changedTouches[0].clientX - start.x;
-      const deltaY = e.changedTouches[0].clientY - start.y;
-      const deltaTime = Date.now() - start.time;
-
-      // Predominantly horizontal swipe and fast (< 500ms)
-      if (
-        deltaTime < 500 &&
-        Math.abs(deltaX) > 45 &&
-        Math.abs(deltaX) > Math.abs(deltaY) * 1.3
-      ) {
-        if (deltaX < 0) {
-          // Swipe Left -> Next Page
-          setSwipeIndicator("Next Page →");
-          setTimeout(() => setSwipeIndicator(null), 700);
-          goToNextPage();
-        } else {
-          // Swipe Right -> Previous Page
-          setSwipeIndicator("← Previous Page");
-          setTimeout(() => setSwipeIndicator(null), 700);
-          goToPrevPage();
-        }
-      }
-    }
-  };
-
-  // Keyboard navigation & security interceptors
+  // Keyboard Shortcuts: Ctrl + / Ctrl - / Ctrl 0, Page Up / Page Down, Arrow Keys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+
+      // Zoom Shortcuts: Ctrl + / Ctrl = (Zoom In), Ctrl - (Zoom Out), Ctrl 0 (Reset)
+      if (isCtrlOrMeta) {
+        if (e.key === "=" || e.key === "+") {
+          e.preventDefault();
+          handleZoomIn();
+          return;
+        } else if (e.key === "-" || e.key === "_") {
+          e.preventDefault();
+          handleZoomOut();
+          return;
+        } else if (e.key === "0") {
+          e.preventDefault();
+          handleResetZoom();
+          return;
+        }
+      }
+
+      // Page Navigation
       if (docFormat === "pdf") {
-        if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
-          goToNextPage();
-        } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
-          goToPrevPage();
+        if (e.key === "ArrowDown" || e.key === "PageDown") {
+          if (viewMode === "single") {
+            goToNextPage();
+          }
+        } else if (e.key === "ArrowUp" || e.key === "PageUp") {
+          if (viewMode === "single") {
+            goToPrevPage();
+          }
         } else if (e.key === "Home") {
           jumpToPage(1);
         } else if (e.key === "End") {
@@ -558,15 +500,56 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
         }
       }
 
-      // Toggle controls with 'H'
+      // Hide / Show controls with 'H'
       if (e.key.toLowerCase() === "h") {
         setControlsVisible((v) => !v);
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, { passive: false });
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [docFormat, goToNextPage, goToPrevPage, jumpToPage, totalPages]);
+  }, [docFormat, viewMode, totalPages, handleZoomIn, handleZoomOut, handleResetZoom]);
+
+  // Page Navigation Handlers
+  const jumpToPage = useCallback(
+    (page: number) => {
+      const target = Math.min(Math.max(1, page), totalPages);
+      setCurrentPage(target);
+      setPageInput(target.toString());
+      saveProgress(target, totalPages);
+      setIsDrawerOpen(false);
+
+      if (viewMode === "continuous") {
+        const pageEl = document.getElementById(`pdf-page-${target}`);
+        if (pageEl) {
+          pageEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+    },
+    [totalPages, saveProgress, viewMode]
+  );
+
+  const goToNextPage = useCallback(() => {
+    if (currentPage < totalPages) {
+      jumpToPage(currentPage + 1);
+    }
+  }, [currentPage, totalPages, jumpToPage]);
+
+  const goToPrevPage = useCallback(() => {
+    if (currentPage > 1) {
+      jumpToPage(currentPage - 1);
+    }
+  }, [currentPage, jumpToPage]);
+
+  // Called when a page enters the viewport during continuous scroll
+  const handlePageVisible = useCallback(
+    (pageNumber: number) => {
+      setCurrentPage(pageNumber);
+      setPageInput(pageNumber.toString());
+      saveProgress(pageNumber, totalPages);
+    },
+    [saveProgress, totalPages]
+  );
 
   // Fullscreen toggle
   const toggleFullscreen = () => {
@@ -579,7 +562,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
     }
   };
 
-  // Canvas visual filter based on reading tone
+  // Canvas visual tone filter class
   const toneFilterClass = useMemo(() => {
     if (readingTone === "night") {
       return "filter invert-[0.92] hue-rotate-180 contrast-[1.08] brightness-[0.96]";
@@ -599,25 +582,22 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
     >
       <div
         ref={containerRef}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        className="relative flex flex-col h-screen w-screen bg-[#09090b] text-zinc-100 select-none overflow-hidden font-sans"
+        className="relative flex flex-col h-screen w-screen bg-[#09090b] text-zinc-100 select-text overflow-hidden font-sans reader-secure-viewport"
       >
-        {/* Swipe Visual Feedback Toast */}
+        {/* Zoom & Action Feedback Toast */}
         {swipeIndicator && (
           <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none px-4 py-2 rounded-full bg-zinc-900/90 border border-zinc-700 text-xs font-semibold text-zinc-200 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-150">
             {swipeIndicator}
           </div>
         )}
 
-        {/* 1. Sleek Floating Header Pill */}
+        {/* 1. TOP TOOLBAR PILL */}
         <header
-          className={`fixed top-3 sm:top-4 left-1/2 -translate-x-1/2 z-40 transition-all duration-300 w-[95%] sm:w-auto max-w-3xl ${
+          className={`fixed top-3 sm:top-4 left-1/2 -translate-x-1/2 z-40 transition-all duration-300 w-[96%] sm:w-auto max-w-4xl ${
             controlsVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4 pointer-events-none"
           }`}
         >
-          <div className="flex items-center justify-between sm:justify-start space-x-2 sm:space-x-3 rounded-full border border-zinc-800/80 bg-zinc-950/85 px-3 sm:px-4 py-2 shadow-2xl backdrop-blur-md">
+          <div className="flex items-center justify-between sm:justify-start space-x-2 sm:space-x-3 rounded-full border border-zinc-800/90 bg-zinc-950/90 px-3 sm:px-4 py-2 shadow-2xl backdrop-blur-md">
             {/* Back button */}
             <Link
               href="/home"
@@ -630,20 +610,55 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
             <div className="h-3.5 w-px bg-zinc-800 shrink-0" />
 
             {/* Document Title & Format Badge */}
-            <div className="flex items-center space-x-2 min-w-0 max-w-[130px] sm:max-w-xs md:max-w-sm truncate">
+            <div className="flex items-center space-x-2 min-w-0 max-w-[120px] sm:max-w-xs md:max-w-sm truncate">
               <span className="truncate text-xs font-medium text-zinc-200" title={documentTitle}>
                 {documentTitle}
               </span>
               <span className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-mono uppercase bg-zinc-800 text-zinc-400">
-                View Only
+                {docFormat}
               </span>
             </div>
 
             <div className="h-3.5 w-px bg-zinc-800 shrink-0 hidden sm:block" />
 
+            {/* View Mode Toggle (Continuous Vertical Scroll vs Single Page) */}
+            {docFormat === "pdf" && (
+              <div className="hidden sm:flex items-center bg-zinc-900 rounded-full p-0.5 border border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("continuous")}
+                  className={`flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-medium transition ${
+                    viewMode === "continuous"
+                      ? "bg-[var(--accent)] text-white shadow-xs font-semibold"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                  title="Continuous Vertical Scroll (Normal PDF View)"
+                >
+                  <ScrollText className="h-3 w-3" />
+                  <span>Scroll</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("single")}
+                  className={`flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-medium transition ${
+                    viewMode === "single"
+                      ? "bg-[var(--accent)] text-white shadow-xs font-semibold"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                  title="Single Page Flip Mode"
+                >
+                  <BookOpen className="h-3 w-3" />
+                  <span>Page</span>
+                </button>
+              </div>
+            )}
+
+            <div className="h-3.5 w-px bg-zinc-800 shrink-0 hidden md:block" />
+
             {/* Reading Tone Toggles (Paper, Night, Sepia) */}
             <div className="hidden md:flex items-center space-x-1">
               <button
+                type="button"
                 onClick={() => setReadingTone("default")}
                 className={`px-2 py-0.5 text-[10px] rounded-full transition ${
                   readingTone === "default"
@@ -655,6 +670,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
                 Paper
               </button>
               <button
+                type="button"
                 onClick={() => setReadingTone("night")}
                 className={`px-2 py-0.5 text-[10px] rounded-full transition ${
                   readingTone === "night"
@@ -666,6 +682,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
                 Night
               </button>
               <button
+                type="button"
                 onClick={() => setReadingTone("sepia")}
                 className={`px-2 py-0.5 text-[10px] rounded-full transition ${
                   readingTone === "sepia"
@@ -680,22 +697,29 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
 
             <div className="h-3.5 w-px bg-zinc-800 shrink-0" />
 
-            {/* Zoom Controls */}
+            {/* Smooth Zoom Controls & Reset */}
             <div className="flex items-center space-x-1 text-zinc-400">
               <button
-                onClick={() => setScale((s) => Math.max(0.7, s - 0.15))}
+                type="button"
+                onClick={handleZoomOut}
                 className="p-1 hover:text-white transition"
-                title="Zoom Out"
+                title="Zoom Out (Ctrl -)"
               >
                 <ZoomOut className="h-3.5 w-3.5" />
               </button>
-              <span className="px-1 text-[11px] font-mono text-zinc-400 hidden sm:inline">
-                {Math.round(scale * 100)}%
-              </span>
               <button
-                onClick={() => setScale((s) => Math.min(2.5, s + 0.15))}
+                type="button"
+                onClick={handleResetZoom}
+                className="px-1.5 py-0.5 text-[11px] font-mono text-zinc-300 hover:text-white transition cursor-pointer"
+                title="Click to reset zoom (Ctrl 0)"
+              >
+                {Math.round(scale * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={handleZoomIn}
                 className="p-1 hover:text-white transition"
-                title="Zoom In"
+                title="Zoom In (Ctrl +)"
               >
                 <ZoomIn className="h-3.5 w-3.5" />
               </button>
@@ -706,6 +730,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
             {/* Quick Page Jump Drawer Toggle */}
             {docFormat === "pdf" && (
               <button
+                type="button"
                 onClick={() => setIsDrawerOpen((o) => !o)}
                 className={`flex h-7 w-7 items-center justify-center rounded-full transition ${
                   isDrawerOpen
@@ -718,8 +743,9 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
               </button>
             )}
 
-            {/* Wishlist / Favorite Heart Button */}
+            {/* Wishlist / Favorite Button */}
             <button
+              type="button"
               onClick={handleToggleFavorite}
               disabled={isFavLoading}
               className={`flex h-7 w-7 items-center justify-center rounded-full transition ${
@@ -739,6 +765,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
 
             {/* Fullscreen Toggle */}
             <button
+              type="button"
               onClick={toggleFullscreen}
               className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-white transition"
               title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
@@ -752,9 +779,10 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
           </div>
         </header>
 
-        {/* 2. Main Reading Viewport */}
+        {/* 2. MAIN READING VIEWPORT */}
         <main
-          className="relative flex-1 overflow-auto bg-[#09090b] flex items-center justify-center p-2 sm:p-6"
+          ref={mainScrollRef}
+          className="relative flex-1 overflow-y-auto overflow-x-auto bg-[#09090b] flex flex-col items-center pt-16 sm:pt-20 pb-20 px-2 sm:px-6 scroll-smooth select-text"
           onClick={() => {
             if (isDrawerOpen) setIsDrawerOpen(false);
           }}
@@ -772,36 +800,65 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
               <h3 className="text-sm font-semibold text-zinc-200">Unable to Open Note</h3>
               <p className="mt-1 text-xs text-zinc-400">{errorMessage}</p>
               <button
+                type="button"
                 onClick={() => router.push("/home")}
                 className="mt-4 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-white transition"
               >
                 Return to Library
               </button>
             </div>
-          ) : docFormat === "pdf" ? (
-            /* PDF Canvas Viewport with Gesture Support & Tone Filter */
-            <div className="relative shadow-2xl transition-all duration-150">
-              <canvas
-                ref={canvasRef}
-                className={`block rounded-sm transition-all duration-150 ${toneFilterClass}`}
+          ) : docFormat === "pdf" && pdfDoc ? (
+            /* PDF VIEWPORT (Continuous Vertical Scroll or Single Page) */
+            viewMode === "continuous" ? (
+              <div
+                className="flex flex-col items-center w-full max-w-full transition-transform duration-75 select-text"
                 style={{
-                  boxShadow: "0 10px 40px rgba(0, 0, 0, 0.7)",
+                  transformOrigin: "top center",
                 }}
-              />
-              {showWatermark && (
-                <Watermark
+              >
+                {Array.from({ length: totalPages }, (_, idx) => {
+                  const pNum = idx + 1;
+                  return (
+                    <PdfPageItem
+                      key={pNum}
+                      pageNumber={pNum}
+                      pdfDoc={pdfDoc}
+                      scale={scale}
+                      toneFilterClass={toneFilterClass}
+                      showWatermark={showWatermark}
+                      studentName={studentName}
+                      rollNumber={rollNumber}
+                      email={email}
+                      containerWidth={containerWidth}
+                      onPageVisible={handlePageVisible}
+                      onLinkClick={jumpToPage}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              /* Single Page Mode */
+              <div className="my-auto">
+                <PdfPageItem
+                  pageNumber={currentPage}
+                  pdfDoc={pdfDoc}
+                  scale={scale}
+                  toneFilterClass={toneFilterClass}
+                  showWatermark={showWatermark}
                   studentName={studentName}
                   rollNumber={rollNumber}
                   email={email}
-                  page={currentPage}
+                  containerWidth={containerWidth}
+                  onPageVisible={handlePageVisible}
+                  onLinkClick={jumpToPage}
                 />
-              )}
-            </div>
+              </div>
+            )
           ) : docFormat === "docx" ? (
-            /* Word Document Viewport */
-            <div className="relative w-full max-w-4xl bg-zinc-900/90 border border-zinc-800 p-8 sm:p-12 rounded-2xl shadow-2xl overflow-auto max-h-[88vh]">
+            /* WORD DOCUMENT VIEWPORT */
+            <div className="relative w-full max-w-4xl bg-zinc-900/90 border border-zinc-800 p-8 sm:p-14 rounded-2xl shadow-2xl my-auto text-zinc-100 select-text overflow-hidden">
               <div
-                className="docx-rendered-content text-zinc-200 selection:bg-zinc-800"
+                className="docx-rendered-content prose prose-invert max-w-none text-zinc-200 selection:bg-zinc-800 leading-relaxed space-y-4"
                 dangerouslySetInnerHTML={{ __html: htmlContent }}
               />
               {showWatermark && (
@@ -814,31 +871,58 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
               )}
             </div>
           ) : docFormat === "excel" ? (
-            /* Excel Spreadsheet Viewport */
-            <div className="relative w-full max-w-5xl bg-zinc-900/90 border border-zinc-800 p-4 sm:p-6 rounded-2xl shadow-2xl overflow-auto max-h-[88vh]">
-              {excelSheets.length > 1 && (
-                <div className="flex space-x-2 border-b border-zinc-800 pb-2 mb-4 overflow-x-auto">
+            /* EXCEL SPREADSHEET VIEWPORT */
+            <div className="relative w-full max-w-6xl bg-zinc-900/95 border border-zinc-800 p-4 sm:p-6 rounded-2xl shadow-2xl my-auto text-zinc-100 select-text">
+              {/* Sheet Switcher & Search Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-3 mb-4">
+                {/* Sheets Tabs */}
+                <div className="flex items-center space-x-1 overflow-x-auto">
                   {excelSheets.map((s, idx) => (
                     <button
                       key={idx}
+                      type="button"
                       onClick={() => setActiveSheetIndex(idx)}
-                      className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
                         activeSheetIndex === idx
-                          ? "bg-zinc-800 text-white font-semibold"
-                          : "text-zinc-400 hover:text-zinc-200"
+                          ? "bg-[var(--accent)] text-white font-semibold shadow-xs"
+                          : "bg-zinc-800/60 text-zinc-400 hover:text-white"
                       }`}
                     >
                       {s.name}
                     </button>
                   ))}
                 </div>
-              )}
+
+                {/* Filter Table Rows */}
+                <div className="flex items-center space-x-2 bg-zinc-950 px-3 py-1.5 rounded-lg border border-zinc-800">
+                  <Search className="h-3.5 w-3.5 text-zinc-400" />
+                  <input
+                    type="text"
+                    value={excelSearchQuery}
+                    onChange={(e) => setExcelSearchQuery(e.target.value)}
+                    placeholder="Search spreadsheet rows..."
+                    className="bg-transparent text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none w-48"
+                  />
+                  {excelSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setExcelSearchQuery("")}
+                      className="text-zinc-400 hover:text-white"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Formatted Excel Table */}
               <div
-                className="excel-reader-table overflow-auto"
+                className="excel-reader-table overflow-x-auto max-h-[75vh]"
                 dangerouslySetInnerHTML={{
                   __html: excelSheets[activeSheetIndex]?.html || "<p>Empty sheet</p>",
                 }}
               />
+
               {showWatermark && (
                 <Watermark
                   studentName={studentName}
@@ -849,9 +933,18 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
               )}
             </div>
           ) : (
-            /* Markdown / Text Viewport */
-            <div className="relative w-full max-w-3xl bg-zinc-900/90 border border-zinc-800 p-6 sm:p-10 rounded-2xl shadow-2xl overflow-auto max-h-[88vh]">
-              <pre className="font-mono text-xs sm:text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed">
+            /* CODE / MARKDOWN / TEXT VIEWPORT */
+            <div className="relative w-full max-w-4xl bg-zinc-900/90 border border-zinc-800 p-6 sm:p-10 rounded-2xl shadow-2xl my-auto text-zinc-100 select-text overflow-hidden">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-4">
+                <span className="text-xs font-mono text-zinc-400 flex items-center gap-1.5">
+                  <FileCode className="h-4 w-4 text-[var(--accent)]" />
+                  <span>{documentTitle}</span>
+                </span>
+                <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                  Formatted Text
+                </span>
+              </div>
+              <pre className="font-mono text-xs sm:text-sm text-zinc-200 whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-[75vh] p-4 rounded-xl bg-zinc-950/80 border border-zinc-800">
                 {htmlContent}
               </pre>
               {showWatermark && (
@@ -866,7 +959,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
           )}
         </main>
 
-        {/* 3. Quick Page Navigation Drawer (Slide-Over Panel) */}
+        {/* 3. QUICK PAGE NAVIGATION DRAWER (Slide-Over Panel) */}
         {isDrawerOpen && docFormat === "pdf" && (
           <div className="absolute right-0 top-0 bottom-0 w-72 sm:w-80 bg-zinc-950/95 border-l border-zinc-800/80 p-5 z-40 shadow-2xl flex flex-col justify-between backdrop-blur-xl animate-in slide-in-from-right duration-200">
             <div>
@@ -878,6 +971,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setIsDrawerOpen(false)}
                   className="p-1 rounded-full text-zinc-400 hover:text-white"
                 >
@@ -902,6 +996,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
                   placeholder={`1 - ${totalPages}`}
                 />
                 <button
+                  type="button"
                   onClick={() => jumpToPage(parseInt(pageInput, 10) || 1)}
                   className="px-3 h-9 rounded-lg text-xs font-semibold text-white bg-[var(--accent)] hover:opacity-90 transition shrink-0"
                 >
@@ -920,6 +1015,7 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
                   return (
                     <button
                       key={pNum}
+                      type="button"
                       onClick={() => jumpToPage(pNum)}
                       className={`h-11 rounded-xl text-xs font-mono font-semibold flex items-center justify-center transition border ${
                         isActive
@@ -934,28 +1030,34 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
               </div>
             </div>
 
-            {/* Mobile swipe helper tip */}
-            <div className="pt-4 border-t border-zinc-800/80 flex items-center space-x-2 text-[11px] text-zinc-500">
-              <Smartphone className="h-3.5 w-3.5 shrink-0" />
-              <span>Swipe left / right on screen to flip pages</span>
+            {/* Helper tips */}
+            <div className="pt-4 border-t border-zinc-800/80 space-y-1 text-[11px] text-zinc-500">
+              <div className="flex items-center space-x-1.5">
+                <ScrollText className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                <span>Continuous vertical scroll active</span>
+              </div>
+              <div className="text-[10px] text-zinc-600">
+                Shortcuts: Ctrl + / Ctrl - to zoom, Ctrl 0 to reset
+              </div>
             </div>
           </div>
         )}
 
-        {/* 4. Bottom Scrubber & Quick Page Navigation Bar */}
+        {/* 4. BOTTOM FLOATING SCRUBBER BAR */}
         {docFormat === "pdf" && (
           <footer
             className={`fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-40 transition-all duration-300 w-[95%] sm:w-auto max-w-lg ${
               controlsVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4 pointer-events-none"
             }`}
           >
-            <div className="flex items-center space-x-3 rounded-full border border-zinc-800/80 bg-zinc-950/85 px-4 py-2 shadow-2xl backdrop-blur-md">
+            <div className="flex items-center space-x-3 rounded-full border border-zinc-800/80 bg-zinc-950/90 px-4 py-2 shadow-2xl backdrop-blur-md">
               {/* Prev Page Button */}
               <button
+                type="button"
                 onClick={goToPrevPage}
                 disabled={currentPage <= 1}
                 className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition"
-                title="Previous Page (← or Swipe Right)"
+                title="Previous Page (Up Arrow or PgUp)"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -984,10 +1086,11 @@ export const DocumentReader: React.FC<DocumentReaderProps> = ({
 
               {/* Next Page Button */}
               <button
+                type="button"
                 onClick={goToNextPage}
                 disabled={currentPage >= totalPages}
                 className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition"
-                title="Next Page (→ or Swipe Left)"
+                title="Next Page (Down Arrow or PgDn)"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>

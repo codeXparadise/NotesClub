@@ -16,14 +16,17 @@ import {
   ChevronRight,
   Sun,
   Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
   X,
   LogOut,
   FolderOpen,
   Heart,
   FileText,
+  Trash2,
+  History,
+  RotateCcw,
+  Check,
 } from "lucide-react";
+import { TopNotificationPanel } from "@/components/student/TopNotificationPanel";
 
 // =========================================================================
 // Category Color Map (Name -> [startColor, endColor])
@@ -155,7 +158,6 @@ export default function StudentHomePage() {
 
   // Theme & Layout State
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [isRailExpanded, setIsRailExpanded] = useState(false);
   const [studentName, setStudentName] = useState("Vishal");
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -174,8 +176,131 @@ export default function StudentHomePage() {
   const [isSearchingServer, setIsSearchingServer] = useState(false);
   const [searchCategoryFilter, setSearchCategoryFilter] = useState("all");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const favScrollRef = useRef<HTMLDivElement>(null);
+
+  // Search History State
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [isSearchHistoryOpen, setIsSearchHistoryOpen] = useState(false);
+
+  // Profile Menu State
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  // Clear Reading History State
+  const [isClearingHistory, setIsClearingHistory] = useState(false);
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
+  const [clearedNotice, setClearedNotice] = useState<string | null>(null);
+
+  // Load search history from API
+  useEffect(() => {
+    fetch("/api/search/history")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data?.searches)) {
+          const queries = data.searches
+            .map((s: any) => (typeof s === "string" ? s : s.query))
+            .filter(Boolean);
+          setSearchHistory(queries);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Close search history dropdown and profile menu on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsSearchHistoryOpen(false);
+      }
+      if (
+        profileMenuRef.current &&
+        !profileMenuRef.current.contains(e.target as Node)
+      ) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelectSearchHistory = (q: string) => {
+    setRawQuery(q);
+    setDebouncedQuery(q.trim().toLowerCase());
+    setIsSearchHistoryOpen(false);
+  };
+
+  const handleClearSearchHistory = async () => {
+    try {
+      setSearchHistory([]);
+      await fetch("/api/search/history", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      });
+    } catch (e) {
+      console.error("Clear search history failed:", e);
+    }
+  };
+
+  const handleDeleteSearchQuery = async (queryToDelete: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      setSearchHistory((prev) => prev.filter((q) => q !== queryToDelete));
+      await fetch("/api/search/history", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: queryToDelete }),
+      });
+    } catch (e) {
+      console.error("Delete search query failed:", e);
+    }
+  };
+
+  const handleClearReadingHistory = async () => {
+    if (isClearingHistory) return;
+    setIsClearingHistory(true);
+    try {
+      setReadingHistory([]);
+      setConfirmClearHistory(false);
+      setClearedNotice("Reading history cleared successfully");
+      setTimeout(() => setClearedNotice(null), 3000);
+
+      await fetch("/api/progress", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      });
+    } catch (err) {
+      console.error("Failed to clear reading history:", err);
+    } finally {
+      setIsClearingHistory(false);
+    }
+  };
+
+  const handleRemoveReadingItem = async (documentId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      setReadingHistory((prev) => prev.filter((item) => item.document_id !== documentId));
+      await fetch("/api/progress", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documentId }),
+      });
+    } catch (err) {
+      console.error("Failed to remove item from reading history:", err);
+    }
+  };
+
+  const prefetchDocument = useCallback((docId: string) => {
+    if (typeof window === "undefined" || !docId) return;
+    router.prefetch(`/read/${docId}`);
+  }, [router]);
 
   // Dark mode init
   useEffect(() => {
@@ -547,237 +672,6 @@ export default function StudentHomePage() {
       }}
     >
       {/* =========================================================================
-          LEFT RAIL (76px fixed, collapsible/expandable to 250px, bottom-bar on mobile)
-         ========================================================================= */}
-      <aside
-        className={`fixed top-0 left-0 h-screen z-50 hidden md:flex flex-col justify-between border-r transition-all duration-300 ${
-          isRailExpanded ? "w-[250px]" : "w-[76px]"
-        }`}
-        style={{
-          backgroundColor: "var(--surface)",
-          borderColor: "var(--line)",
-          boxShadow: "var(--shadow)",
-        }}
-      >
-        {/* Top: Logo Mark & Collapse Toggle */}
-        <div className="flex flex-col items-center pt-6 px-3 space-y-6">
-          <div className="flex items-center justify-between w-full">
-            <Link
-              href="/home"
-              className="flex items-center space-x-3 group"
-              title="Notes Club Home"
-            >
-              {/* App logo mark: rounded square, accent bg, serif "N" */}
-              <div
-                className="h-11 w-11 rounded-[14px] flex items-center justify-center text-white shadow-sm transition-transform active:scale-95"
-                style={{ backgroundColor: "var(--accent)" }}
-              >
-                <span className="font-serif text-2xl font-bold leading-none select-none">
-                  N
-                </span>
-              </div>
-              {isRailExpanded && (
-                <div className="flex flex-col overflow-hidden">
-                  <span className="font-serif text-lg font-semibold tracking-tight text-[var(--ink)] whitespace-nowrap">
-                    Notes Club
-                  </span>
-                  <span className="text-[10px] uppercase font-mono tracking-wider text-[var(--muted)]">
-                    Study Vault
-                  </span>
-                </div>
-              )}
-            </Link>
-
-            {isRailExpanded && (
-              <button
-                onClick={() => setIsRailExpanded(false)}
-                className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition"
-                title="Collapse sidebar"
-              >
-                <PanelLeftClose className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-
-          {!isRailExpanded && (
-            <button
-              onClick={() => setIsRailExpanded(true)}
-              className="p-2 rounded-xl text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition"
-              title="Expand sidebar"
-            >
-              <PanelLeftOpen className="h-4 w-4" />
-            </button>
-          )}
-
-          {/* Icon-Only / Labelled Nav Items */}
-          <nav className="flex flex-col w-full space-y-1.5">
-            {/* Home (Active item: --accent-soft bg, --accent icon) */}
-            <Link
-              href="/home"
-              className={`flex items-center rounded-2xl transition ${
-                isRailExpanded ? "px-3.5 py-3 space-x-3.5" : "justify-center h-12 w-12 mx-auto"
-              }`}
-              style={{
-                backgroundColor: "var(--accent-soft)",
-                color: "var(--accent)",
-              }}
-              title="Home"
-            >
-              <BookOpen className="h-5 w-5 shrink-0" />
-              {isRailExpanded && (
-                <span className="font-semibold text-sm tracking-tight whitespace-nowrap">
-                  Home
-                </span>
-              )}
-            </Link>
-
-            {/* Browse / Search */}
-            <button
-              onClick={() => searchInputRef.current?.focus()}
-              className={`flex items-center rounded-2xl text-[var(--ink-2)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)] transition ${
-                isRailExpanded ? "px-3.5 py-3 space-x-3.5" : "justify-center h-12 w-12 mx-auto"
-              }`}
-              title="Browse & Search (⌘K)"
-            >
-              <Compass className="h-5 w-5 shrink-0 text-[var(--muted)]" />
-              {isRailExpanded && (
-                <span className="font-medium text-sm whitespace-nowrap">Browse</span>
-              )}
-            </button>
-
-            {/* Library */}
-            <Link
-              href="/home#categories"
-              className={`flex items-center rounded-2xl text-[var(--ink-2)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)] transition ${
-                isRailExpanded ? "px-3.5 py-3 space-x-3.5" : "justify-center h-12 w-12 mx-auto"
-              }`}
-              title="Collections & Categories"
-            >
-              <Library className="h-5 w-5 shrink-0 text-[var(--muted)]" />
-              {isRailExpanded && (
-                <span className="font-medium text-sm whitespace-nowrap">Library</span>
-              )}
-            </Link>
-
-            {/* Notifications with red badge */}
-            <Link
-              href="/notifications"
-              className={`relative flex items-center rounded-2xl text-[var(--ink-2)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)] transition ${
-                isRailExpanded ? "px-3.5 py-3 space-x-3.5" : "justify-center h-12 w-12 mx-auto"
-              }`}
-              title="Announcements"
-            >
-              <div className="relative">
-                <Bell className="h-5 w-5 shrink-0 text-[var(--muted)]" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white shadow-sm ring-1 ring-white">
-                    {unreadCount > 9 ? "9+" : unreadCount}
-                  </span>
-                )}
-              </div>
-              {isRailExpanded && (
-                <span className="font-medium text-sm whitespace-nowrap">Notifications</span>
-              )}
-            </Link>
-
-            {/* History */}
-            <Link
-              href="/home#history"
-              className={`flex items-center rounded-2xl text-[var(--ink-2)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)] transition ${
-                isRailExpanded ? "px-3.5 py-3 space-x-3.5" : "justify-center h-12 w-12 mx-auto"
-              }`}
-              title="Reading History"
-            >
-              <Clock className="h-5 w-5 shrink-0 text-[var(--muted)]" />
-              {isRailExpanded && (
-                <span className="font-medium text-sm whitespace-nowrap">History</span>
-              )}
-            </Link>
-
-            {/* Wishlist */}
-            <Link
-              href="/home#favorites"
-              className={`flex items-center rounded-2xl text-[var(--ink-2)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)] transition ${
-                isRailExpanded ? "px-3.5 py-3 space-x-3.5" : "justify-center h-12 w-12 mx-auto"
-              }`}
-              title="Saved Wishlist"
-            >
-              <Heart
-                className={`h-5 w-5 shrink-0 transition-colors ${
-                  favoriteDocs.length > 0 ? "text-rose-500 fill-rose-500/20" : "text-[var(--muted)]"
-                }`}
-              />
-              {isRailExpanded && (
-                <div className="flex items-center justify-between w-full">
-                  <span className="font-medium text-sm whitespace-nowrap">Wishlist</span>
-                  {favoriteDocs.length > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-500">
-                      {favoriteDocs.length}
-                    </span>
-                  )}
-                </div>
-              )}
-            </Link>
-
-            {/* Profile / Account */}
-            <Link
-              href="/profile"
-              className={`flex items-center rounded-2xl text-[var(--ink-2)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)] transition ${
-                isRailExpanded ? "px-3.5 py-3 space-x-3.5" : "justify-center h-12 w-12 mx-auto"
-              }`}
-              title="My Profile & Security"
-            >
-              <User className="h-5 w-5 shrink-0 text-[var(--muted)]" />
-              {isRailExpanded && (
-                <span className="font-medium text-sm whitespace-nowrap">Profile</span>
-              )}
-            </Link>
-          </nav>
-        </div>
-
-        {/* Flexible spacer */}
-        <div className="flex-1" />
-
-        {/* Bottom: Student Avatar + Sign Out */}
-        <div className="p-3 border-t" style={{ borderColor: "var(--line)" }}>
-          <div
-            className={`flex items-center rounded-2xl transition ${
-              isRailExpanded ? "p-2 justify-between" : "justify-center"
-            }`}
-          >
-            <div className="flex items-center space-x-3 overflow-hidden">
-              <div
-                className="h-10 w-10 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0 select-none shadow-sm"
-                style={{ backgroundColor: "var(--accent)" }}
-              >
-                {studentName.slice(0, 2).toUpperCase()}
-              </div>
-              {isRailExpanded && (
-                <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-semibold text-[var(--ink)] truncate">
-                    {studentName}
-                  </span>
-                  <span className="text-[10px] text-[var(--muted)] truncate font-mono">
-                    FYBSCAI
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {isRailExpanded ? (
-              <button
-                onClick={handleSignOut}
-                className="p-1.5 rounded-lg text-[var(--muted)] hover:text-rose-600 hover:bg-[var(--surface-2)] transition"
-                title="Sign out"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
-            ) : null}
-          </div>
-        </div>
-      </aside>
-
-      {/* =========================================================================
           MOBILE BOTTOM TAB BAR (<768px, Android-First)
          ========================================================================= */}
       <nav
@@ -850,11 +744,7 @@ export default function StudentHomePage() {
       {/* =========================================================================
           MAIN COLUMN (Generous padding ~38px horizontal, max-width container)
          ========================================================================= */}
-      <div
-        className={`transition-all duration-300 pb-28 md:pb-16 ${
-          isRailExpanded ? "md:pl-[250px]" : "md:pl-[76px]"
-        }`}
-      >
+      <div className="pb-28 md:pb-16 w-full">
         <main className="mx-auto max-w-6xl px-4 sm:px-8 lg:px-[38px] pt-8 sm:pt-12 space-y-10 sm:space-y-12">
           
           {/* =======================================================================
@@ -862,63 +752,231 @@ export default function StudentHomePage() {
              ======================================================================= */}
           <section className="flex flex-col md:flex-row md:items-center justify-between gap-5 pb-2">
             
-            {/* LEFT — Greeting Block */}
-            <div className="space-y-1 min-w-0">
-              <h1 className="font-serif text-2xl sm:text-[31px] font-medium tracking-tight text-[var(--ink)] leading-snug">
-                {greetingWord},{" "}
-                <span style={{ color: "var(--accent)" }}>{studentName}</span>
-              </h1>
-              <p className="text-xs sm:text-sm text-[var(--muted)] tracking-wide">
-                Continue where you left off &mdash; {allDocuments.length} files across{" "}
-                {categories.length} collections.
-              </p>
+            {/* LEFT — Brand & Greeting Block */}
+            <div className="flex items-center space-x-3.5 min-w-0">
+              <Link
+                href="/home"
+                className="h-11 w-11 rounded-[14px] flex items-center justify-center text-white shadow-sm shrink-0 transition-transform active:scale-95"
+                style={{ backgroundColor: "var(--accent)" }}
+                title="Notes Club Home"
+              >
+                <span className="font-serif text-2xl font-bold leading-none select-none">
+                  N
+                </span>
+              </Link>
+              <div className="space-y-0.5 min-w-0">
+                <h1 className="font-serif text-2xl sm:text-[31px] font-medium tracking-tight text-[var(--ink)] leading-snug truncate">
+                  {greetingWord},{" "}
+                  <span style={{ color: "var(--accent)" }}>{studentName}</span>
+                </h1>
+                <p className="text-xs sm:text-sm text-[var(--muted)] tracking-wide truncate">
+                  Continue where you left off &mdash; {allDocuments.length} files across{" "}
+                  {categories.length} collections.
+                </p>
+              </div>
             </div>
 
-            {/* RIGHT — Search Pill & Dark/Light Toggle */}
-            <div className="flex items-center space-x-3 w-full md:w-auto">
-              {/* Rounded pill (radius 14px), white surface, 1px --line-2 border, soft shadow */}
-              <div
-                className="relative flex items-center w-full md:w-[320px] lg:w-[360px] h-12 rounded-[14px] px-3.5 transition shadow-[var(--shadow)] border focus-within:ring-4"
-                style={{
-                  backgroundColor: "var(--surface)",
-                  borderColor: "var(--line-2)",
-                }}
-              >
-                <Search className="h-4 w-4 shrink-0 text-[var(--muted)] mr-2.5 pointer-events-none" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={rawQuery}
-                  onChange={(e) => setRawQuery(e.target.value)}
-                  placeholder="Search categories, books, topics…"
-                  className="w-full bg-transparent text-xs sm:text-sm text-[var(--ink)] placeholder:text-[var(--muted)] focus:outline-none"
-                  aria-label="Search study material"
-                />
+            {/* RIGHT — Profile Menu, Search Pill, Notification Panel, and Dark/Light Toggle */}
+            <div className="flex items-center space-x-2.5 sm:space-x-3 w-full md:w-auto">
+              
+              {/* Profile Avatar & Dropdown Menu (Directly Left of Search Panel) */}
+              <div ref={profileMenuRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsProfileMenuOpen((prev) => !prev)}
+                  className="h-12 w-12 rounded-[14px] flex items-center justify-center font-bold text-xs text-white shadow-[var(--shadow)] border transition active:scale-95 hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  style={{
+                    backgroundColor: "var(--accent)",
+                    borderColor: "var(--line-2)",
+                  }}
+                  title={`Profile & Account (${studentName})`}
+                  aria-label="Student profile menu"
+                >
+                  {studentName.slice(0, 2).toUpperCase()}
+                </button>
 
-                {rawQuery ? (
-                  <button
-                    onClick={() => {
-                      setRawQuery("");
-                      setDebouncedQuery("");
-                      searchInputRef.current?.focus();
-                    }}
-                    className="p-1 rounded-full text-[var(--muted)] hover:text-[var(--ink)] transition"
-                    title="Clear search"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                ) : (
-                  <kbd
-                    className="hidden sm:inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[10px] text-[var(--muted)] border"
+                {/* Profile Dropdown Menu */}
+                {isProfileMenuOpen && (
+                  <div
+                    className="absolute left-0 sm:right-auto md:right-0 md:left-auto top-14 z-50 w-56 rounded-[18px] border shadow-2xl backdrop-blur-xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-150 py-1.5"
                     style={{
-                      backgroundColor: "var(--surface-2)",
-                      borderColor: "var(--line)",
+                      backgroundColor: "var(--surface)",
+                      borderColor: "var(--line-2)",
                     }}
                   >
-                    ⌘K
-                  </kbd>
+                    {/* User Identity Info */}
+                    <div className="px-4 py-3 border-b" style={{ borderColor: "var(--line)" }}>
+                      <p className="text-xs font-semibold text-[var(--ink)] truncate">
+                        {studentName}
+                      </p>
+                      <p className="text-[11px] text-[var(--muted)] truncate font-mono">
+                        Student Account
+                      </p>
+                    </div>
+
+                    <div className="py-1">
+                      <Link
+                        href="/profile"
+                        onClick={() => setIsProfileMenuOpen(false)}
+                        className="flex items-center space-x-2.5 px-4 py-2 text-xs font-medium text-[var(--ink)] hover:bg-[var(--surface-2)] transition"
+                      >
+                        <User className="h-4 w-4 text-[var(--muted)]" />
+                        <span>My Profile</span>
+                      </Link>
+
+                      <Link
+                        href="/home#favorites"
+                        onClick={() => setIsProfileMenuOpen(false)}
+                        className="flex items-center justify-between px-4 py-2 text-xs font-medium text-[var(--ink)] hover:bg-[var(--surface-2)] transition"
+                      >
+                        <div className="flex items-center space-x-2.5">
+                          <Heart className="h-4 w-4 text-rose-500" />
+                          <span>Saved Wishlist</span>
+                        </div>
+                        {favoriteDocs.length > 0 && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-500">
+                            {favoriteDocs.length}
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
+                        href="/home#history"
+                        onClick={() => setIsProfileMenuOpen(false)}
+                        className="flex items-center justify-between px-4 py-2 text-xs font-medium text-[var(--ink)] hover:bg-[var(--surface-2)] transition"
+                      >
+                        <div className="flex items-center space-x-2.5">
+                          <Clock className="h-4 w-4 text-[var(--muted)]" />
+                          <span>Reading History</span>
+                        </div>
+                        {readingHistory.length > 0 && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] font-mono">
+                            {readingHistory.length}
+                          </span>
+                        )}
+                      </Link>
+                    </div>
+
+                    <div className="border-t pt-1" style={{ borderColor: "var(--line)" }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsProfileMenuOpen(false);
+                          handleSignOut();
+                        }}
+                        className="w-full flex items-center space-x-2.5 px-4 py-2 text-xs font-medium text-rose-600 hover:bg-rose-500/10 transition"
+                      >
+                        <LogOut className="h-4 w-4 text-rose-600" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
+
+              {/* Search Pill Container */}
+              <div ref={searchContainerRef} className="relative w-full md:w-[300px] lg:w-[340px]">
+                <div
+                  className="relative flex items-center w-full h-12 rounded-[14px] px-3.5 transition shadow-[var(--shadow)] border focus-within:ring-4"
+                  style={{
+                    backgroundColor: "var(--surface)",
+                    borderColor: "var(--line-2)",
+                  }}
+                >
+                  <Search className="h-4 w-4 shrink-0 text-[var(--muted)] mr-2.5 pointer-events-none" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={rawQuery}
+                    onFocus={() => setIsSearchHistoryOpen(true)}
+                    onChange={(e) => setRawQuery(e.target.value)}
+                    placeholder="Search categories, books, topics…"
+                    className="w-full bg-transparent text-xs sm:text-sm text-[var(--ink)] placeholder:text-[var(--muted)] focus:outline-none"
+                    aria-label="Search study material"
+                  />
+
+                  {rawQuery ? (
+                    <button
+                      onClick={() => {
+                        setRawQuery("");
+                        setDebouncedQuery("");
+                        searchInputRef.current?.focus();
+                      }}
+                      className="p-1 rounded-full text-[var(--muted)] hover:text-[var(--ink)] transition"
+                      title="Clear search"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <kbd
+                      className="hidden sm:inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[10px] text-[var(--muted)] border"
+                      style={{
+                        backgroundColor: "var(--surface-2)",
+                        borderColor: "var(--line)",
+                      }}
+                    >
+                      ⌘K
+                    </kbd>
+                  )}
+                </div>
+
+                {/* Animated Recent Search History Dropdown */}
+                {isSearchHistoryOpen && !rawQuery && searchHistory.length > 0 && (
+                  <div
+                    className="absolute left-0 right-0 top-14 z-50 rounded-[18px] border shadow-2xl backdrop-blur-xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-150"
+                    style={{
+                      backgroundColor: "var(--surface)",
+                      borderColor: "var(--line-2)",
+                    }}
+                  >
+                    <div
+                      className="flex items-center justify-between px-3.5 py-2.5 border-b text-xs"
+                      style={{ borderColor: "var(--line)" }}
+                    >
+                      <span className="flex items-center space-x-1.5 font-semibold text-[var(--ink)]">
+                        <History className="h-3.5 w-3.5 text-[var(--muted)]" />
+                        <span>Recent Searches</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleClearSearchHistory}
+                        className="text-[11px] font-medium text-[var(--accent)] hover:underline"
+                      >
+                        Clear search history
+                      </button>
+                    </div>
+
+                    <div className="max-h-56 overflow-y-auto divide-y divide-[var(--line)]">
+                      {searchHistory.map((q) => (
+                        <div
+                          key={q}
+                          onClick={() => handleSelectSearchHistory(q)}
+                          className="group flex items-center justify-between px-3.5 py-2.5 text-xs text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition"
+                        >
+                          <div className="flex items-center space-x-2.5 truncate pr-2">
+                            <Clock className="h-3.5 w-3.5 text-[var(--muted)] shrink-0" />
+                            <span className="truncate">{q}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSearchQuery(q, e)}
+                            className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-[var(--muted)] hover:text-rose-600 hover:bg-[var(--surface)] transition shrink-0"
+                            title="Remove from history"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Notification Panel Button & Animated Overlay beside search bar */}
+              <TopNotificationPanel
+                initialUnreadCount={unreadCount}
+                onUnreadCountChange={setUnreadCount}
+              />
 
               {/* Dark / Light Mode Toggle Button */}
               <button
@@ -1058,7 +1116,10 @@ export default function StudentHomePage() {
                     return (
                       <Link
                         key={doc.id}
-                        href={`/read/${encodeURIComponent(slugify(doc.title))}`}
+                        href={`/read/${doc.id}`}
+                        prefetch={true}
+                        onMouseEnter={() => prefetchDocument(doc.id)}
+                        onTouchStart={() => prefetchDocument(doc.id)}
                         className="group flex flex-col justify-between rounded-[18px] border p-4 sm:p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-md select-none"
                         style={{
                           backgroundColor: "var(--surface)",
@@ -1134,6 +1195,38 @@ export default function StudentHomePage() {
                   <span className="text-xs text-[var(--muted)] font-mono">
                     ({filteredHistory.length})
                   </span>
+
+                  {/* Clear Reading History Button */}
+                  {confirmClearHistory ? (
+                    <div className="flex items-center space-x-1.5 bg-rose-500/10 px-2.5 py-1 rounded-xl border border-rose-500/30 animate-in fade-in zoom-in-95 duration-150">
+                      <span className="text-[11px] font-medium text-rose-600 dark:text-rose-400">Clear all?</span>
+                      <button
+                        type="button"
+                        onClick={handleClearReadingHistory}
+                        disabled={isClearingHistory}
+                        className="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-600 text-white hover:bg-rose-700 transition"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmClearHistory(false)}
+                        className="px-1.5 py-0.5 rounded text-[11px] font-medium text-[var(--muted)] hover:text-[var(--ink)] transition"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClearHistory(true)}
+                      className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-medium text-[var(--muted)] hover:text-rose-600 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition"
+                      title="Clear reading history"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      <span className="hidden sm:inline">Clear history</span>
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-center space-x-2">
@@ -1176,7 +1269,7 @@ export default function StudentHomePage() {
               {/* Horizontal Scrollable Row (Swipeable on touch, hide scrollbar) */}
               <div
                 ref={historyScrollRef}
-                className="flex gap-[18px] overflow-x-auto scrollbar-none pb-2 pt-1 scroll-smooth"
+                className="smooth-scroll-x flex gap-[18px] overflow-x-auto scrollbar-none pb-2 pt-1 scroll-smooth"
                 style={{
                   scrollSnapType: "x mandatory",
                   WebkitOverflowScrolling: "touch",
@@ -1190,19 +1283,12 @@ export default function StudentHomePage() {
                   const [gradStart, gradEnd] = getCategoryGradient(categoryTitle);
                   const total = item.total_pages || doc.page_count || 1;
                   const current = item.last_page || 1;
-
-                  // Extract clean filename slug
-                  const desc = (doc as any)?.description || "";
-                  const slugMatch = desc.match(/slug:([^|]+)/);
-                  const fileSlug = slugMatch
-                    ? slugMatch[1].trim()
-                    : slugify(doc.title || item.document_id);
+                  const targetDocId = item.document_id || doc.id;
 
                   return (
-                    <Link
+                    <div
                       key={item.id}
-                      href={`/read/${encodeURIComponent(fileSlug)}`}
-                      className="group flex-none w-[320px] rounded-[18px] border p-4 transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.99] flex space-x-3.5 select-none"
+                      className="group relative flex-none w-[320px] rounded-[18px] border p-4 transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.99] select-none"
                       style={{
                         backgroundColor: "var(--surface)",
                         borderColor: "var(--line)",
@@ -1210,98 +1296,116 @@ export default function StudentHomePage() {
                         scrollSnapAlign: "start",
                       }}
                     >
-                      {/* Cover: 62x88px, radius 9px, gradient fill, book title printed in small Fraunces, darker spine strip */}
-                      <div
-                        className="relative w-[62px] h-[88px] rounded-[9px] shrink-0 overflow-hidden flex flex-col justify-between p-1.5 text-white shadow-sm"
-                        style={{
-                          background: `linear-gradient(135deg, ${gradStart}, ${gradEnd})`,
-                        }}
+                      {/* Individual Remove Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => handleRemoveReadingItem(item.document_id, e)}
+                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-full bg-[var(--surface)] text-[var(--muted)] hover:text-rose-600 shadow-md border border-[var(--line)] transition-all absolute top-2.5 right-2.5 z-10 hover:scale-110 active:scale-95"
+                        title="Remove from history"
                       >
-                        {/* Darker spine strip on left edge */}
-                        <div className="absolute left-0 top-0 bottom-0 w-[5px] bg-black/25" />
+                        <X className="h-3 w-3" />
+                      </button>
 
-                        {/* Faint textured lines */}
+                      <Link
+                        href={`/read/${targetDocId}`}
+                        prefetch={true}
+                        onMouseEnter={() => prefetchDocument(targetDocId)}
+                        onTouchStart={() => prefetchDocument(targetDocId)}
+                        className="flex space-x-3.5 w-full overflow-hidden"
+                      >
+                        {/* Cover: 62x88px, radius 9px, gradient fill, book title printed in small Fraunces, darker spine strip */}
                         <div
-                          className="absolute inset-0 pointer-events-none opacity-20"
+                          className="relative w-[62px] h-[88px] rounded-[9px] shrink-0 overflow-hidden flex flex-col justify-between p-1.5 text-white shadow-sm"
                           style={{
-                            backgroundImage:
-                              "repeating-linear-gradient(135deg, rgba(255,255,255,.2) 0 4px, transparent 4px 8px)",
+                            background: `linear-gradient(135deg, ${gradStart}, ${gradEnd})`,
                           }}
-                        />
+                        >
+                          {/* Darker spine strip on left edge */}
+                          <div className="absolute left-0 top-0 bottom-0 w-[5px] bg-black/25" />
 
-                        <div className="relative pl-1">
-                          <span className="font-serif text-[8px] leading-tight line-clamp-4 font-medium text-white/95">
-                            {doc.title}
-                          </span>
-                        </div>
-
-                        <div className="relative pl-1">
-                          <span className="text-[7px] font-mono tracking-wider uppercase text-white/80">
-                            {Math.round(item.percent)}%
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Right side: Category label, title, progress bar, pages, relative time */}
-                      <div className="flex-1 min-w-0 flex flex-col justify-between">
-                        <div>
-                          <span
-                            className="block text-[10px] uppercase font-bold tracking-wider truncate mb-0.5"
-                            style={{ color: "var(--muted)" }}
-                          >
-                            {categoryTitle}
-                          </span>
-                          <h3 className="font-semibold text-xs sm:text-[13px] text-[var(--ink)] line-clamp-2 leading-snug group-hover:text-[var(--accent)] transition">
-                            {doc.title}
-                          </h3>
-                        </div>
-
-                        <div className="space-y-1.5 mt-2">
-                          {/* Progress bar: 6px, track --surface-2, fill --sage */}
+                          {/* Faint textured lines */}
                           <div
-                            className="h-[6px] w-full rounded-full overflow-hidden"
-                            style={{ backgroundColor: "var(--surface-2)" }}
-                          >
-                            <div
-                              className="h-full rounded-full transition-all duration-300"
-                              style={{
-                                width: `${Math.min(100, Math.max(6, item.percent))}%`,
-                                backgroundColor: "var(--sage)",
-                              }}
-                            />
+                            className="absolute inset-0 pointer-events-none opacity-20"
+                            style={{
+                              backgroundImage:
+                                "repeating-linear-gradient(135deg, rgba(255,255,255,.2) 0 4px, transparent 4px 8px)",
+                            }}
+                          />
+
+                          <div className="relative pl-1">
+                            <span className="font-serif text-[8px] leading-tight line-clamp-4 font-medium text-white/95">
+                              {doc.title}
+                            </span>
                           </div>
 
-                          <div className="flex items-center justify-between text-[10px] text-[var(--muted)]">
-                            <span className="font-medium">
-                              Page {current} of {total}
+                          <div className="relative pl-1">
+                            <span className="text-[7px] font-mono tracking-wider uppercase text-white/80">
+                              {Math.round(item.percent)}%
                             </span>
-                            <div className="flex items-center space-x-2">
-                              <span>{formatRelativeTime(item.updated_at)}</span>
-                              <button
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  toggleFavorite({
-                                    id: item.document_id,
-                                    title: doc.title,
-                                    categories: doc.categories ? { id: item.document_id, name: doc.categories.name } : null,
-                                  }, e);
+                          </div>
+                        </div>
+
+                        {/* Right side: Category label, title, progress bar, pages, relative time */}
+                        <div className="flex-1 min-w-0 flex flex-col justify-between pr-3">
+                          <div>
+                            <span
+                              className="block text-[10px] uppercase font-bold tracking-wider truncate mb-0.5"
+                              style={{ color: "var(--muted)" }}
+                            >
+                              {categoryTitle}
+                            </span>
+                            <h3 className="font-semibold text-xs sm:text-[13px] text-[var(--ink)] line-clamp-2 leading-snug group-hover:text-[var(--accent)] transition">
+                              {doc.title}
+                            </h3>
+                          </div>
+
+                          <div className="space-y-1.5 mt-2">
+                            {/* Progress bar: 6px, track --surface-2, fill --sage */}
+                            <div
+                              className="h-[6px] w-full rounded-full overflow-hidden"
+                              style={{ backgroundColor: "var(--surface-2)" }}
+                            >
+                              <div
+                                className="h-full rounded-full transition-all duration-300"
+                                style={{
+                                  width: `${Math.min(100, Math.max(6, item.percent))}%`,
+                                  backgroundColor: "var(--sage)",
                                 }}
-                                className="p-1 rounded-full text-zinc-400 hover:text-rose-500 hover:scale-110 active:scale-95 transition"
-                                title={favoriteIds.has(item.document_id) ? "Remove from wishlist" : "Add to wishlist"}
-                              >
-                                <Heart
-                                  className={`h-3 w-3 ${
-                                    favoriteIds.has(item.document_id)
-                                      ? "fill-rose-500 text-rose-500"
-                                      : "text-zinc-400"
-                                  }`}
-                                />
-                              </button>
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between text-[10px] text-[var(--muted)]">
+                              <span className="font-medium">
+                                Page {current} of {total}
+                              </span>
+                              <div className="flex items-center space-x-2">
+                                <span>{formatRelativeTime(item.updated_at)}</span>
+                                <button
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    toggleFavorite({
+                                      id: item.document_id,
+                                      title: doc.title,
+                                      categories: doc.categories ? { id: item.document_id, name: doc.categories.name } : null,
+                                    }, e);
+                                  }}
+                                  className="p-1 rounded-full text-zinc-400 hover:text-rose-500 hover:scale-110 active:scale-95 transition"
+                                  title={favoriteIds.has(item.document_id) ? "Remove from wishlist" : "Add to wishlist"}
+                                >
+                                  <Heart
+                                    className={`h-3 w-3 ${
+                                      favoriteIds.has(item.document_id)
+                                        ? "fill-rose-500 text-rose-500"
+                                        : "text-zinc-400"
+                                    }`}
+                                  />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    </Link>
+                      </Link>
+                    </div>
                   );
                 })}
               </div>
@@ -1357,14 +1461,14 @@ export default function StudentHomePage() {
               {filteredFavorites.length > 0 ? (
                 <div
                   ref={favScrollRef}
-                  className="flex space-x-3.5 sm:space-x-4 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory"
+                  className="smooth-scroll-x flex space-x-3.5 sm:space-x-4 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory"
                   style={{ WebkitOverflowScrolling: "touch" }}
                 >
                   {filteredFavorites.map((doc) => {
                     const [gradStart, gradEnd] = getCategoryGradient(
                       doc.categories?.name || "E-Books"
                     );
-                    const readUrl = `/read/${(doc as any).slug || doc.id}`;
+                    const readUrl = `/read/${doc.id}`;
 
                     return (
                       <div
@@ -1405,7 +1509,12 @@ export default function StudentHomePage() {
                             >
                               {doc.categories?.name || "Library Note"}
                             </span>
-                            <Link href={readUrl}>
+                            <Link
+                              href={readUrl}
+                              prefetch={true}
+                              onMouseEnter={() => prefetchDocument(doc.id)}
+                              onTouchStart={() => prefetchDocument(doc.id)}
+                            >
                               <h3 className="font-semibold text-xs sm:text-[13px] text-[var(--ink)] line-clamp-2 leading-snug group-hover:text-[var(--accent)] transition">
                                 {doc.title}
                               </h3>
@@ -1415,6 +1524,9 @@ export default function StudentHomePage() {
                           <div className="flex items-center justify-between pt-2 border-t border-[var(--line)]">
                             <Link
                               href={readUrl}
+                              prefetch={true}
+                              onMouseEnter={() => prefetchDocument(doc.id)}
+                              onTouchStart={() => prefetchDocument(doc.id)}
                               className="text-[11px] font-semibold text-[var(--accent)] hover:underline flex items-center space-x-1"
                             >
                               <span>Read note</span>
@@ -1567,6 +1679,23 @@ export default function StudentHomePage() {
               </div>
             </section>
           </>
+        )}
+
+        {/* Toast Notification for History Operations */}
+        {clearedNotice && (
+          <div
+            className="fixed bottom-20 md:bottom-8 right-6 z-50 rounded-2xl border px-4 py-3 shadow-2xl flex items-center space-x-2.5 animate-in fade-in slide-in-from-bottom-3 duration-200"
+            style={{
+              backgroundColor: "var(--surface)",
+              borderColor: "var(--line)",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            <div className="h-6 w-6 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+              <Check className="h-3.5 w-3.5" />
+            </div>
+            <span className="text-xs font-semibold text-[var(--ink)]">{clearedNotice}</span>
+          </div>
         )}
         </main>
       </div>

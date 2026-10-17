@@ -107,6 +107,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Resolve valid course_id so user profile is never null
+    let resolvedCourseId = courseId;
+    if (!resolvedCourseId) {
+      const lowerCourse = cleanCourseName.toLowerCase();
+      if (lowerCourse.includes("cse") || lowerCourse.includes("computer") || lowerCourse.includes("btech") || lowerCourse.includes("cs")) {
+        resolvedCourseId = "c1000000-0000-0000-0000-000000000001"; // CSE
+      } else if (lowerCourse.includes("it") || lowerCourse.includes("information") || lowerCourse.includes("web")) {
+        resolvedCourseId = "c1000000-0000-0000-0000-000000000002"; // IT
+      } else if (lowerCourse.includes("ece") || lowerCourse.includes("electronics")) {
+        resolvedCourseId = "c1000000-0000-0000-0000-000000000003"; // ECE
+      } else {
+        resolvedCourseId = "b22ae884-83a8-4aef-a710-cddb1af60854"; // First Year B.Sc AI
+      }
+    }
+
     // 3. Create user in auth.users with auto-confirmation so student can log in instantly
     const metadata = {
       full_name: cleanName,
@@ -116,7 +131,7 @@ export async function POST(request: NextRequest) {
       stream: cleanStream,
       course_name: cleanCourseName,
       year_or_class: cleanYear,
-      course_id: courseId || null,
+      course_id: resolvedCourseId,
       role: "student",
     };
 
@@ -152,22 +167,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. Upsert user into profiles with academic details
-    const profilePayload: Record<string, any> = {
+    // 4. Upsert user into profiles with base columns only (safe for schema cache)
+    const profilePayload = {
       id: authUser.user.id,
       full_name: cleanName,
       roll_number: cleanRoll,
-      division: cleanDivision,
-      course_id: courseId || null,
+      course_id: resolvedCourseId,
       email: cleanEmail,
       role: "student",
       is_blocked: false,
-      college_name: cleanCollege,
-      stream: cleanStream,
-      course_name: cleanCourseName,
-      year_or_class: cleanYear,
-      last_active_at: new Date().toISOString(),
-      last_login_at: new Date().toISOString(),
     };
 
     const { error: profileError } = await supabaseAdmin
@@ -175,24 +183,19 @@ export async function POST(request: NextRequest) {
       .upsert(profilePayload, { onConflict: "id" });
 
     if (profileError) {
-      console.warn("Profile extended upsert warning (falling back to base fields):", profileError.message);
-      // Fallback in case table schema columns are still propagating
-      await supabaseAdmin.from("profiles").upsert(
-        {
-          id: authUser.user.id,
-          full_name: cleanName,
-          roll_number: cleanRoll,
-          course_id: courseId || null,
-          email: cleanEmail,
-          role: "student",
-          is_blocked: false,
-          college_name: cleanCollege,
-          stream: cleanStream,
-          course_name: cleanCourseName,
-          year_or_class: cleanYear,
-        },
-        { onConflict: "id" }
-      );
+      console.warn("Profile upsert warning:", profileError.message);
+    }
+
+    // 5. Log account creation in Redis activity feed
+    try {
+      const { logUserActivity } = await import("@/lib/redis");
+      await logUserActivity(authUser.user.id, {
+        activity_type: "account_created",
+        description: `Student account registered (${cleanRoll}) - ${cleanStream}`,
+        details: { rollNumber: cleanRoll, stream: cleanStream, course: cleanCourseName },
+      });
+    } catch {
+      // Non-blocking
     }
 
     return NextResponse.json({

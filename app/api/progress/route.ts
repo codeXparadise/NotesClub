@@ -95,3 +95,38 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+
+    if (userErr || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const { documentId, all } = body;
+
+    let query = supabase.from("reading_progress").delete().eq("student_id", user.id);
+
+    if (!all && documentId) {
+      query = query.eq("document_id", documentId);
+    }
+
+    const { error } = await query;
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, message: all ? "Reading history cleared" : "Item removed from history" });
+  } catch (err: any) {
+    console.error("DELETE /api/progress error:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+

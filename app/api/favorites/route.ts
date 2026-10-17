@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { redisSAdd, redisSRem, redisSMembers } from "@/lib/redis";
+import { redisSAdd, redisSRem, redisSMembers, logUserActivity } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
 
@@ -91,6 +91,23 @@ export async function POST(req: NextRequest) {
       // Ignored if table not created yet
     }
 
+    // Record activity log in Redis
+    try {
+      const { data: docData } = await supabase
+        .from("documents")
+        .select("title")
+        .eq("id", documentId)
+        .maybeSingle();
+      const docTitle = docData?.title || "Study Note";
+      await logUserActivity(profile.id, {
+        activity_type: "wishlist_add",
+        description: `Added "${docTitle}" to Wishlist`,
+        details: { documentId, title: docTitle },
+      });
+    } catch {
+      // Non-blocking
+    }
+
     return NextResponse.json({
       success: true,
       isFavorited: true,
@@ -138,6 +155,23 @@ export async function DELETE(req: NextRequest) {
         .eq("document_id", documentId);
     } catch {
       // Ignored
+    }
+
+    // Record activity log in Redis
+    try {
+      const { data: docData } = await supabase
+        .from("documents")
+        .select("title")
+        .eq("id", documentId)
+        .maybeSingle();
+      const docTitle = docData?.title || "Study Note";
+      await logUserActivity(profile.id, {
+        activity_type: "wishlist_remove",
+        description: `Removed "${docTitle}" from Wishlist`,
+        details: { documentId, title: docTitle },
+      });
+    } catch {
+      // Non-blocking
     }
 
     return NextResponse.json({

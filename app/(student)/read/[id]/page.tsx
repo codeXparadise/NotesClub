@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { generateStreamToken } from "@/lib/token";
 import { DocumentReader } from "@/components/reader/DocumentReader";
+import { cacheGet, cacheSet } from "@/lib/redis";
 import { notFound } from "next/navigation";
 
 export default async function ReadDocumentPage({
@@ -14,54 +15,63 @@ export default async function ReadDocumentPage({
   const { id } = await params;
 
   const admin = createAdminClient();
-
-  const isUUID =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-
-  let doc = null;
-
-  if (isUUID) {
-    const { data } = await admin
-      .from("documents")
-      .select("id, title, mime_type, page_count, show_watermark, is_published, description")
-      .eq("id", id)
-      .maybeSingle();
-    doc = data;
-  }
+  const cacheKey = `notes_club:doc_reader:${id}`;
+  let doc: any = await cacheGet(cacheKey);
 
   if (!doc) {
-    // Look up by clean filename-slug
-    const decodedSlug = decodeURIComponent(id).trim().toLowerCase();
-    
-    // 1. Exact slug match with pipe boundary: slug:<decodedSlug> |
-    const { data: slugDoc } = await admin
-      .from("documents")
-      .select("id, title, mime_type, page_count, show_watermark, is_published, description")
-      .ilike("description", `%slug:${decodedSlug} |%`)
-      .maybeSingle();
+    const isUUID =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
-    if (slugDoc) {
-      doc = slugDoc;
-    } else {
-      // 2. Slug match with space boundary
-      const { data: spaceDoc } = await admin
+    if (isUUID) {
+      const { data } = await admin
         .from("documents")
         .select("id, title, mime_type, page_count, show_watermark, is_published, description")
-        .ilike("description", `%slug:${decodedSlug} %`)
+        .eq("id", id)
+        .maybeSingle();
+      doc = data;
+    }
+
+    if (!doc) {
+      // Look up by clean filename-slug
+      const decodedSlug = decodeURIComponent(id).trim().toLowerCase();
+      
+      // 1. Exact slug match with pipe boundary: slug:<decodedSlug> |
+      const { data: slugDoc } = await admin
+        .from("documents")
+        .select("id, title, mime_type, page_count, show_watermark, is_published, description")
+        .ilike("description", `%slug:${decodedSlug} |%`)
         .maybeSingle();
 
-      if (spaceDoc) {
-        doc = spaceDoc;
+      if (slugDoc) {
+        doc = slugDoc;
       } else {
-        // 3. Fallback: match anywhere in slug or title keywords
-        const titleSearch = decodedSlug.replace(/[-_]+/g, " ");
-        const { data: fallbackDoc } = await admin
+        // 2. Slug match with space boundary
+        const { data: spaceDoc } = await admin
           .from("documents")
           .select("id, title, mime_type, page_count, show_watermark, is_published, description")
-          .or(`description.ilike.%slug:${decodedSlug}%,title.ilike.%${titleSearch}%`)
-          .limit(1)
+          .ilike("description", `%slug:${decodedSlug} %`)
           .maybeSingle();
-        doc = fallbackDoc;
+
+        if (spaceDoc) {
+          doc = spaceDoc;
+        } else {
+          // 3. Fallback: match anywhere in slug or title keywords
+          const titleSearch = decodedSlug.replace(/[-_]+/g, " ");
+          const { data: fallbackDoc } = await admin
+            .from("documents")
+            .select("id, title, mime_type, page_count, show_watermark, is_published, description")
+            .or(`description.ilike.%slug:${decodedSlug}%,title.ilike.%${titleSearch}%`)
+            .limit(1)
+            .maybeSingle();
+          doc = fallbackDoc;
+        }
+      }
+    }
+
+    if (doc) {
+      await cacheSet(cacheKey, doc, 3600);
+      if (doc.id !== id) {
+        await cacheSet(`notes_club:doc_reader:${doc.id}`, doc, 3600);
       }
     }
   }
@@ -81,8 +91,8 @@ export default async function ReadDocumentPage({
 
   const initialPage = progress?.last_page || 1;
 
-  // Generate short-lived HMAC streaming token bound to this student & document (60 seconds)
-  const streamToken = generateStreamToken(doc.id, profile.id, 60);
+  // Generate secure HMAC streaming token bound to this student & document (2 hours)
+  const streamToken = generateStreamToken(doc.id, profile.id, 7200);
 
   return (
     <DocumentReader

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getUserActivities, logUserActivity } from "@/lib/redis";
 
 // GET /api/profile: Fetch current user profile and activity log
 export async function GET() {
@@ -16,7 +17,7 @@ export async function GET() {
 
     const supabaseAdmin = createAdminClient();
 
-    // 1. Fetch user profile
+    // 1. Fetch user base profile from profiles table
     const { data: profile, error: profileErr } = await supabaseAdmin
       .from("profiles")
       .select("*, courses(id, name, code)")
@@ -27,22 +28,20 @@ export async function GET() {
       return NextResponse.json({ error: "Profile not found" }, { status: 404 });
     }
 
-    // 2. Fetch user activity log
-    const { data: activities } = await supabaseAdmin
-      .from("user_activities")
-      .select("id, activity_type, description, details, created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(30);
+    // 2. Fetch user metadata from Supabase Auth
+    const metadata = user.user_metadata || {};
+
+    // 3. Fetch user activities from Redis
+    const activities = await getUserActivities(user.id, 30);
 
     return NextResponse.json({
       profile: {
         ...profile,
-        division: profile.division || "—",
-        college_name: profile.college_name || "KES Shroff College",
-        stream: profile.stream || "General",
-        year_or_class: profile.year_or_class || "FY",
-        course_name: profile.course_name || profile.courses?.name || "General Course",
+        division: metadata.division || profile.division || "—",
+        college_name: metadata.college_name || profile.college_name || "KES Shroff College",
+        stream: metadata.stream || profile.stream || profile.courses?.name || "General",
+        year_or_class: metadata.year_or_class || profile.year_or_class || "FY",
+        course_name: metadata.course_name || profile.course_name || profile.courses?.name || "General Course",
       },
       activities: activities || [],
     });
@@ -68,70 +67,77 @@ export async function PUT(request: NextRequest) {
 
     const supabaseAdmin = createAdminClient();
 
-    // Prepare update payload
-    const updates: Record<string, any> = {
+    // Academic updates to persist in user_metadata
+    const metadataUpdates: Record<string, any> = {};
+    // Base table updates (only existing columns in profiles table: full_name, updated_at)
+    const baseUpdates: Record<string, any> = {
       updated_at: new Date().toISOString(),
     };
 
     const changedFields: string[] = [];
 
     if (typeof fullName === "string" && fullName.trim()) {
-      updates.full_name = fullName.trim();
+      baseUpdates.full_name = fullName.trim();
+      metadataUpdates.full_name = fullName.trim();
       changedFields.push("Name");
     }
     if (typeof division === "string") {
-      updates.division = division.trim().toUpperCase();
+      metadataUpdates.division = division.trim().toUpperCase();
       changedFields.push("Division");
     }
     if (typeof stream === "string" && stream.trim()) {
-      updates.stream = stream.trim();
+      metadataUpdates.stream = stream.trim();
       changedFields.push("Stream");
     }
     if (typeof courseName === "string" && courseName.trim()) {
-      updates.course_name = courseName.trim();
+      metadataUpdates.course_name = courseName.trim();
       changedFields.push("Course");
     }
     if (typeof yearOrClass === "string" && yearOrClass.trim()) {
-      updates.year_or_class = yearOrClass.trim();
+      metadataUpdates.year_or_class = yearOrClass.trim();
       changedFields.push("Class");
     }
 
-    // Update in profiles table
+    // 1. Update in profiles table (only safe base columns)
     const { data: updatedProfile, error: updateErr } = await supabaseAdmin
       .from("profiles")
-      .update(updates)
+      .update(baseUpdates)
       .eq("id", user.id)
-      .select()
+      .select("*, courses(id, name, code)")
       .single();
 
     if (updateErr) {
       return NextResponse.json({ error: updateErr.message }, { status: 400 });
     }
 
-    // Also sync user_metadata on auth.users
+    // 2. Persist extended academic metadata in Supabase Auth user_metadata
+    const newMetadata = {
+      ...user.user_metadata,
+      ...metadataUpdates,
+    };
+
     await supabaseAdmin.auth.admin.updateUserById(user.id, {
-      user_metadata: {
-        ...user.user_metadata,
-        ...updates,
-      },
+      user_metadata: newMetadata,
     });
 
-    // Record activity in user_activities
+    // 3. Record activity in Redis activity log
     const description =
       changedFields.length > 0
         ? `Student updated profile fields: ${changedFields.join(", ")}`
         : "Student updated profile details";
 
-    await supabaseAdmin.from("user_activities").insert({
-      user_id: user.id,
+    await logUserActivity(user.id, {
       activity_type: "profile_update",
       description,
-      details: updates,
+      details: metadataUpdates,
     });
 
     return NextResponse.json({
       success: true,
-      profile: updatedProfile,
+      profile: {
+        ...updatedProfile,
+        ...newMetadata,
+      },
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -153,9 +159,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { activity_type = "account_activity", description = "User updated account" } = body;
 
-    const supabaseAdmin = createAdminClient();
-    await supabaseAdmin.from("user_activities").insert({
-      user_id: user.id,
+    // Log to Redis
+    await logUserActivity(user.id, {
       activity_type,
       description,
       details: { timestamp: new Date().toISOString() },
